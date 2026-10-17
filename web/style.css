@@ -1,0 +1,319 @@
+/* KsuNiMeet Watch — one screen, phone first.
+ *
+ * The film is the page. Everything else is a thin line above and below it, and
+ * nothing is drawn on top of the video: a control that floats over the picture
+ * is a control you have to move out of the way to see a face.
+ */
+
+:root {
+  --ink: #e9eef5;
+  --dim: #8d99a8;
+  --paper: #0d1117;
+  --card: #161b22;
+  --line: #263041;
+  --accent: #4c9ffe;
+  --warn: #e5683f;
+  --ok: #4ec98a;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.45 -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ---------------------------------------------------------------- header -- */
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px calc(10px + env(safe-area-inset-top));
+  padding-top: calc(14px + env(safe-area-inset-top));
+}
+
+.brand {
+  font-weight: 650;
+  letter-spacing: .2px;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.room {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.code {
+  font: 600 15px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: 3px;
+  color: var(--accent);
+  background: #12233c;
+  border: 1px solid #1e3a63;
+  border-radius: 8px;
+  padding: 7px 10px 7px 13px;
+}
+
+/* ----------------------------------------------------------------- cards -- */
+
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 18px 18px;
+  gap: 14px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px;
+  max-width: 520px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -.2px;
+}
+
+.sub {
+  margin: 0 0 18px;
+  color: var(--dim);
+  font-size: 14px;
+}
+
+/* --------------------------------------------------------------- controls -- */
+
+button, .file, .big {
+  font: inherit;
+  font-weight: 600;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, transform .06s ease;
+}
+
+button:active, .file:active { transform: scale(.985); }
+
+.big {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 52px;
+  padding: 14px 16px;
+  font-size: 16px;
+  background: var(--accent);
+  color: #06121f;
+  margin-top: 10px;
+}
+
+.big.ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 7px 11px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.file {
+  background: var(--accent);
+  color: #06121f;
+}
+
+.or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--dim);
+  font-size: 13px;
+  margin: 18px 0 14px;
+}
+
+.or::before, .or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.field {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.field > span {
+  display: block;
+  font-size: 13px;
+  color: var(--dim);
+  margin-bottom: 7px;
+}
+
+input[type=text], input:not([type]) {
+  width: 100%;
+  font: 600 17px/1 ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: #0f1620;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 15px 14px;
+  outline: none;
+}
+
+input:focus { border-color: var(--accent); }
+
+/* A server address is not a room code: no capitals, no 4px tracking, and it
+ * must not be squeezed off the screen. */
+input[type=url] {
+  width: 100%;
+  font: 500 15px/1.3 ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  background: #0f1620;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px;
+  outline: none;
+}
+
+.hint, .err {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--dim);
+}
+
+.err { color: var(--warn); }
+
+/* ------------------------------------------------------------------ bar -- */
+
+.bar {
+  height: 6px;
+  border-radius: 999px;
+  background: #0f1620;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width .2s linear;
+}
+
+/* ----------------------------------------------------------------- video -- */
+
+#stage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.screen {
+  position: relative;
+  background: #000;
+  border-radius: 14px;
+  overflow: hidden;
+  width: 100%;
+  margin: 0 auto;
+  /* Height comes from the film, not from the window: a 16:9 film on a tall
+   * phone must not be stretched into a tall rectangle. */
+  max-height: calc(100dvh - 190px);
+  display: flex;
+  align-items: center;
+}
+
+#video {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100dvh - 190px);
+  display: block;
+  background: #000;
+  object-fit: contain;
+}
+
+.tapstart {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, .45);
+  border: 0;
+  border-radius: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.tapstart span {
+  background: rgba(13, 17, 23, .9);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 12px 20px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--dim);
+  padding: 0 2px;
+  min-height: 20px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dim);
+  flex: none;
+  transition: background .2s ease;
+}
+
+.dot.live { background: var(--ok); }
+.dot.wait { background: var(--warn); }
+
+footer {
+  color: #55616f;
+  font-size: 12px;
+  text-align: center;
+  padding: 0 18px 16px;
+}
+
+@media (min-width: 760px) {
+  main { padding: 10px 24px 24px; }
+  .card { padding: 26px; }
+}

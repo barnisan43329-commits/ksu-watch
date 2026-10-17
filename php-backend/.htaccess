@@ -1,0 +1,26 @@
+# KsuNiMeet Watch — Apache rules for a shared host (InfinityFree, cPanel, any).
+#
+# Everything goes to index.php; the API takes its path from REQUEST_URI.
+# The data directory is denied twice over: once here by name, and again by its
+# own .htaccess, because a host that ignores one of them usually still honours
+# the other.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_URI} ^/data/ [NC]
+    RewriteRule ^ - [F]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# A film piece is 8 MB and the request has to fit around it.
+<IfModule mod_php.c>
+    php_value post_max_size 12M
+    php_value upload_max_filesize 12M
+    php_value max_execution_time 60
+</IfModule>
+
+# The pieces are binary and must never be re-encoded or compressed in transit.
+<IfModule mod_deflate.c>
+    SetEnvIf Request_URI "^/api/part" no-gzip dont-vary
+</IfModule>

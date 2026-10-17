@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Watch together</title>
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+</head>
+<body>
+
+<header>
+  <div class="brand">Watch together</div>
+  <div class="room" id="roomBar" hidden>
+    <span class="code" id="codeText">------</span>
+    <button class="ghost" id="copyBtn" type="button">Copy link</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- 1. Create or join ------------------------------------------------ -->
+  <section id="entry" class="card">
+    <h1>Two people, one film</h1>
+    <p class="sub">
+      The film stays on each phone. Only the buttons travel.
+    </p>
+
+    <!-- Shown once, and only when the page was built without a backend
+         address — which is the case inside the APK if config.js was left
+         empty. Kept on the entry screen because nothing works without it. -->
+    <div id="srvBlock" hidden>
+      <label class="field">
+        <span>Server address</span>
+        <input id="srvInput" type="url" inputmode="url" autocomplete="off"
+               spellcheck="false" placeholder="https://your-site.example">
+      </label>
+      <button class="big ghost" id="srvBtn" type="button">Save and continue</button>
+      <p class="hint">Asked once. It is stored on this phone and asked for again only if it is cleared.</p>
+      <p class="err" id="srvErr" hidden></p>
+      <div class="or"><span>then</span></div>
+    </div>
+
+    <button class="big" id="createBtn" type="button">Create a room</button>
+
+    <div class="or"><span>or</span></div>
+
+    <label class="field">
+      <span>Room code</span>
+      <input id="codeInput" inputmode="latin" autocapitalize="characters"
+             autocomplete="off" spellcheck="false" maxlength="6" placeholder="ABC234">
+    </label>
+    <button class="big ghost" id="joinBtn" type="button">Join</button>
+
+    <p class="err" id="entryErr" hidden></p>
+  </section>
+
+  <!-- 2. Host picks the film ------------------------------------------- -->
+  <section id="pick" class="card" hidden>
+    <h1>Pick the film</h1>
+    <p class="sub">
+      It plays from your phone straight away. It is also copied to the room so
+      the other person gets the exact same file.
+    </p>
+    <label class="big file">
+      <span id="pickLabel">Choose a video</span>
+      <input id="fileInput" type="file" accept="video/*" hidden>
+    </label>
+    <p class="hint" id="pickHint"></p>
+  </section>
+
+  <!-- 3. Guest waits for the film -------------------------------------- -->
+  <section id="wait" class="card" hidden>
+    <h1>In the room</h1>
+    <p class="sub" id="waitText">Waiting for the film…</p>
+    <div class="bar"><i id="dlBar"></i></div>
+    <p class="hint" id="dlHint"></p>
+  </section>
+
+  <!-- 4. Player --------------------------------------------------------- -->
+  <section id="stage" hidden>
+    <div class="screen" id="screen">
+      <video id="video" playsinline preload="auto" controls></video>
+      <button class="tapstart" id="tapStart" type="button" hidden>
+        <span>Tap to start</span>
+      </button>
+    </div>
+    <div class="status">
+      <span class="dot" id="dot"></span>
+      <span id="statusText">setting up…</span>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <span id="foot"></span>
+</footer>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

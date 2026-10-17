@@ -1,0 +1,48 @@
+# Publish web/ to GitHub Pages.
+#
+# This repository IS the project: web/ and php-backend/ sit at its root, so the
+# artifact is web/ and nothing else.
+#
+# The frontend is three files and a config: no build step, no bundler, no
+# dependencies. Pages serves exactly what is in the folder, which is why the
+# only thing that has to be right is config.js — it must name the PHP backend.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - name: Upload the page
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # tools/ goes along for the ride; it is a test harness, not a
+          # dependency of the page, and nothing in index.html loads it.
+          path: web
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

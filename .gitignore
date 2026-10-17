@@ -1,0 +1,10 @@
+# Rooms are runtime state, written by the backend, not source.
+php-backend/data/rooms/
+
+# The APK is a build product of android-app/build.sh and is published as a
+# release asset, not committed.
+*.apk
+
+# Local editor noise
+.DS_Store
+Thumbs.db

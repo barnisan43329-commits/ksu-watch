@@ -1,0 +1,11 @@
+# Rooms live here: film pieces and the shared snapshot. Nothing in this
+# directory may be fetched over HTTP — the API is the only door, and it checks
+# the room code first.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>
