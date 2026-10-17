@@ -6,7 +6,7 @@
 | **the mirror** | https://barnisan43329-commits.github.io/ksu-watch/ |
 | **the PHP** | https://ksunimeet.gt.tc/watch/api/health |
 | **the door** (only the mirror needs it) | https://site-6d82979dc7d4471590b04884f411bb74.freebuff.page/watch/api/health |
-| **the APK** | https://github.com/barnisan43329-commits/ksu-watch/releases/tag/v1.2 |
+| **the APK** | https://github.com/barnisan43329-commits/ksu-watch/releases/tag/v1.3 |
 | **the repository** | https://github.com/barnisan43329-commits/ksu-watch |
 
 **The first line is the app.** The page and the PHP are the same site there, so
@@ -168,10 +168,12 @@ Two rules make the difference between "mirrored" and "twitching":
   3 s film recorded and picked by hand, uploaded (8 MB piece path, preflight and
   POST both 200), pulled by a second client that opened the join link, and a
   press on the guest's side that moved the host to `2.1 s`. No console errors.
-- `android-app/KsuWatch.apk` — `versionCode 3 / 1.2`, signed with the project
+- `android-app/KsuWatch.apk` — `versionCode 4 / 1.3`, signed with the project
   key `35ece4…4efa`, `zipalign -c -p 4` passes, five `assets/www/*` entries with
-  forward-slash paths. It now opens `https://ksunimeet.gt.tc/watch/` and
-  falls back to the bundled copy when the main frame fails. Two defects found while
+  forward-slash paths, and the bundled `app.js` carries the link code (checked
+  inside the archive). It opens `https://ksunimeet.gt.tc/watch/` and falls back
+  to the bundled copy when the main frame fails. The published asset is
+  byte-identical to the build here (`sha256 285d0659…`). Two defects found while
   checking it: the page was loaded from `file://`, where a WebView refuses
   every `fetch` — it is now served from an https origin of the app's own out of
   `assets/www` — and aapt2 on Windows had written asset names with backslashes,
