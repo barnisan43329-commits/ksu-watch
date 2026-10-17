@@ -60,5 +60,9 @@ function ksu_room_get(): void
         'now' => ksu_now_ms(),
         'film' => $meta['film'] ?? null,
         'people' => count($people),
+        // The ids themselves, not just how many: the two phones need to name
+        // each other to open a data channel, and a press that skips the server
+        // is the difference between 500 ms and 5 ms.
+        'ids' => $people,
     ]);
 }

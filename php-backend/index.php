@@ -13,6 +13,8 @@
  *   GET  /api/part?code=&idx=        the same piece back, byte for byte
  *   POST /api/state?code=            a button was pressed          -> snapshot
  *   GET  /api/wait?code=&after=&ms=  HOLD until seq > after       -> snapshot
+ *   POST /api/sig?code=&who=&to=     one WebRTC handshake message for the other phone
+ *   GET  /api/sig?code=&who=         collect mine, once
  *
  * The last one is the reason the app feels instant: it does not ask "anything
  * new?" four times a second, it asks and waits, and the answer is written the
@@ -25,6 +27,7 @@ require_once __DIR__ . '/lib.php';
 require_once __DIR__ . '/api/room.php';
 require_once __DIR__ . '/api/film.php';
 require_once __DIR__ . '/api/sync.php';
+require_once __DIR__ . '/api/sig.php';
 
 if (!KSU_DEBUG) {
     ini_set('display_errors', '0');
@@ -114,6 +117,15 @@ switch ($path) {
 
     case '/api/wait':
         ksu_wait();
+        break;
+
+    /* The two phones introducing themselves so the button can skip the
+     * server afterwards. Once it works, no press comes back here. */
+    case '/api/sig':
+        if ($method === 'POST') {
+            ksu_sig_put();
+        }
+        ksu_sig_get();
         break;
 
     default:

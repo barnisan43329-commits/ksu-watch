@@ -76,6 +76,39 @@ Guest: open the link, the film downloads by itself, the player appears.
 Either side presses play, pause, or drags the bar. Both do the same thing at the
 same millisecond.
 
+## How the button travels (and why it is instant)
+
+Measured on the live host, same origin, real browser:
+
+| | |
+|---|---|
+| a static stylesheet from the host | ~490 ms |
+| `GET /api/health` | ~450 ms |
+| **a press through the server** | **~530 ms** |
+| **a press down the data channel** | **1-3 ms** |
+
+The first two numbers are the point: a 4 KB CSS file costs the same as a PHP
+call, so the delay is the wire to the host, not the code. A press does not need
+to cross an ocean — it needs to reach one other phone.
+
+So the two phones open a **WebRTC data channel** and presses go straight across
+it. The server is used for one thing only: telling them where each other are (a
+dozen SDP lines through `/api/sig`). Once the channel is up:
+
+- the press is on the other phone in milliseconds, positions identical to the
+  millisecond (measured: host `1.000287` · guest `1.000287`, press → guest
+  `play` in **2 ms**);
+- **no held requests run at all** — the page stops asking the server anything,
+  which also removes the request cost that a long watch used to carry;
+- the press is *also* POSTed, so a phone that joins later still lands in the
+  right place.
+
+If the channel cannot come up — symmetric NAT, a network that blocks
+peer-to-peer — the offer goes unanswered, the link drops silently after a few
+tries, and every press travels the old way through `/api/state` and `/api/wait`.
+Same app, same behaviour, ~530 ms. The status line says which one you have:
+*linked · presses are direct*, or nothing.
+
 ## How the mirror is kept exact
 
 Every press stores **one complete snapshot** — position in milliseconds,
@@ -110,9 +143,15 @@ Two rules make the difference between "mirrored" and "twitching":
   appears with no console error. That path has no relay in it at all.
 - `php-backend/tools/test-api.py` — **20 / 20** against a local PHP.
   `relay/test-relay.mjs` re-runs the same ground against the **live** host —
-  **13 / 13**: AES checked block for block against Node's `crypto` (200 random
+  **18 / 18**: AES checked block for block against Node's `crypto` (200 random
   cases), CORS and preflight, a room, two 128 KB pieces up and back down
   byte-identical, a Cyrillic film name, a press released through a held request.
+- **The data channel, between two real pages on the live site**: both linked,
+  `pcState: connected`, 20 of 20 probes at **1 ms**, both sides stopped holding
+  requests — then a real 3 s film: a `play` press on the host reached the guest
+  in **2 ms**, film at `1.000287` on both. A `seek` and a second `play`
+  followed in the same few milliseconds. Against the same host through the
+  server, the same press measured **534 ms** (`web/tools/bench-latency.mjs`).
 - `web/tools/test-mirror.mjs` — **23 / 23**, run against the **live PHP** (through
   `relay/local-door.mjs`, which runs the real relay in-process so the tests spend
   none of the deployed door's allowance): the real `app.js` twice, one "phone"

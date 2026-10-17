@@ -251,6 +251,8 @@
     skew: 0,             // server clock minus this phone's clock, in ms
     skewN: 0,            // how many clock samples have been taken
     skewRtt: 0,          // round trip of the best of them, in ms
+    ptLast: 0,           // the last press timestamp this phone published
+    lastPtBy: {},        // sender -> last press applied, so a duplicate never lands twice
     uploading: false,
     downloading: false
   };
@@ -368,6 +370,251 @@
     });
   }
 
+  /* ================================================================ link ==
+   *
+   * THE BUTTON'S SHORTCUT, AND WHY IT EXISTS.
+   *
+   * Measured on the live host, same origin, in a real browser: a press costs
+   * ~530 ms to reach the other phone, and a 4 KB stylesheet from the same
+   * host costs ~490 ms. So the delay is the wire to the PHP, not this file —
+   * no amount of tidying the request makes it faster, because the request is
+   * not what is slow.
+   *
+   * A press is tiny. It does not need to go through a server on another
+   * continent at all: the two phones can hold a data channel and drop the
+   * press straight across it. On the same wi-fi that is about a millisecond;
+   * across a country, tens. The server is then needed for exactly one thing —
+   * telling the phones where each other are (a dozen SDP lines), which is what
+   * /api/sig is for.
+   *
+   * IF IT DOES NOT CONNECT, NOTHING BREAKS. Some networks refuse peer-to-peer
+   * (symmetric NAT, aggressive firewalls). The offer goes unanswered, the link
+   * gives up quietly after a few tries, and every press travels the way it
+   * always did — through /api/state and /api/wait. The person never sees a
+   * difference except the number.
+   */
+
+  var LINK = {
+    pc: null,
+    ch: null,
+    peer: '',
+    tries: 0,
+    looking: false,
+    stop: true,
+    pressed: 0           // presses seen arriving over the channel, for the console
+  };
+
+  /* The channel that carries presses. One per room, never two. */
+  function linkOpen() {
+    return !!(LINK.ch && LINK.ch.readyState === 'open');
+  }
+
+  /** Start trying to reach the other phone. Cheap to call; it self-guards. */
+  function startLink() {
+    if (!S.code || linkOpen() || LINK.pc) return;
+    if (typeof RTCPeerConnection !== 'function') return;
+    LINK.stop = false;
+    LINK.tries = 0;
+    findPeer();
+  }
+
+  /** Who else is in the room? Then: the lower id offers, the higher answers. */
+  function findPeer() {
+    if (LINK.stop || LINK.looking || linkOpen() || LINK.pc) return;
+    LINK.looking = true;
+
+    apiJson('/api/room?code=' + S.code + '&who=' + S.who).then(function (res) {
+      LINK.looking = false;
+      var ids = (res && res.ids) || [];
+      var other = '';
+      for (var i = 0; i < ids.length; i++) {
+        if (ids[i] !== S.who) other = ids[i];
+      }
+      if (!other) {
+        if (LINK.tries++ < 8) setTimeout(findPeer, 2000);
+        return;
+      }
+      LINK.peer = other;
+      if (S.who < other) makeOffer(); else awaitOffer();
+    }).catch(function () {
+      LINK.looking = false;
+      if (LINK.tries++ < 8) setTimeout(findPeer, 3000);
+    });
+  }
+
+  function newPeer() {
+    var pc = new RTCPeerConnection({
+      // STUN only: no account, no TURN, nothing to pay for. A network that
+      // needs TURN is a network where this link does not come up, and the
+      // HTTP path carries the press instead.
+      iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
+    });
+
+    pc.onicecandidate = function (e) {
+      if (e.candidate && LINK.peer) sig('ice', e.candidate.toJSON ? e.candidate.toJSON() : {
+        candidate: e.candidate.candidate,
+        sdpMid: e.candidate.sdpMid,
+        sdpMLineIndex: e.candidate.sdpMLineIndex
+      });
+    };
+
+    pc.onconnectionstatechange = function () {
+      var st = pc.connectionState;
+      if (st === 'failed' || st === 'closed' || st === 'disconnected') giveUpLink();
+    };
+
+    return pc;
+  }
+
+  function goneUp(ch) {
+    LINK.ch = ch;
+    LINK.tries = 0;
+    ch.onmessage = function (e) {
+      var snap;
+      try { snap = JSON.parse(e.data); } catch (err) { return; }
+      if (!snap) return;
+
+      /* A ping is not a press: it measures the wire and proves the channel is
+       * alive. Two uses in one — the number in the status line is what the
+       * press will cost, and a channel that stops answering is dropped before
+       * ICE would notice. */
+      if (snap.a === 'ping') {
+        try { ch.send(JSON.stringify({ a: 'pong', at: snap.at })); } catch (err) { /* closed */ }
+        return;
+      }
+      if (snap.a === 'pong') {
+        if (snap.at) S.linkMs = Math.round(now() - snap.at);
+        return;
+      }
+
+      if (snap.by === S.who) return;
+      LINK.pressed++;
+      apply(snap);
+    };
+    /* Only when it is ACTUALLY open: goneUp attaches to a channel that may
+     * still be connecting, and a ping fired then would go nowhere and take
+     * the timer with it. */
+    ch.onopen = function () {
+      status('linked · presses are direct', 'live');
+      ping();
+    };
+    ch.onclose = function () {
+      LINK.ch = null;
+      stopPing();
+      status('link lost — back on the room service', 'wait');
+      pump();                       // presses travel through the server again
+      setTimeout(startLink, 3000);  // and try to get the shortcut back
+    };
+    if (ch.readyState === 'open') {
+      status('linked · presses are direct', 'live');
+      ping();
+    }
+  }
+
+  var pingTimer = 0;
+
+  function ping() {
+    if (!linkOpen()) { stopPing(); return; }
+    try { LINK.ch.send(JSON.stringify({ a: 'ping', at: now() })); } catch (e) { /* closed */ }
+    stopPing();
+    pingTimer = setTimeout(ping, 20000);
+  }
+
+  function stopPing() {
+    if (pingTimer) clearTimeout(pingTimer);
+    pingTimer = 0;
+  }
+
+  function makeOffer() {
+    var pc = newPeer();
+    LINK.pc = pc;
+    var ch = pc.createDataChannel('press', { ordered: true });
+    goneUp(ch);
+
+    pc.createOffer().then(function (o) { return pc.setLocalDescription(o); })
+      .then(function () { sig('offer', { type: pc.localDescription.type, sdp: pc.localDescription.sdp }); })
+      .catch(function () { giveUpLink(); });
+
+    pollSig();
+  }
+
+  function awaitOffer() {
+    var pc = newPeer();
+    LINK.pc = pc;
+    pc.ondatachannel = function (e) { goneUp(e.channel); };
+    pollSig();
+  }
+
+  /** Send one handshake message to the other phone. */
+  function sig(kind, data) {
+    if (!LINK.peer) return;
+    apiJson('/api/sig?code=' + S.code + '&who=' + S.who + '&to=' + LINK.peer, {
+      method: 'POST',
+      body: { kind: kind, data: data }
+    }).catch(function () { /* the handshake is allowed to fail */ });
+  }
+
+  /**
+   * Collect what the other phone left for me.
+   *
+   * Runs only while the link is being built: a second per poll, a few dozen
+   * requests for a handshake that lasts about a second, and then not one more
+   * request for as long as the channel is open.
+   */
+  function pollSig() {
+    if (LINK.stop || linkOpen()) return;
+    apiJson('/api/sig?code=' + S.code + '&who=' + S.who).then(function (res) {
+      var msgs = (res && res.msgs) || [];
+      for (var i = 0; i < msgs.length; i++) takeSig(msgs[i]);
+      if (linkOpen()) return;
+      if (++LINK.tries > 40) { giveUpLink(); return; }
+      setTimeout(pollSig, 900);
+    }).catch(function () {
+      if (++LINK.tries > 40) giveUpLink();
+      else setTimeout(pollSig, 1500);
+    });
+  }
+
+  function takeSig(msg) {
+    var pc = LINK.pc;
+    if (!pc || !msg || !msg.data) return;
+    var d = msg.data;
+
+    if (msg.kind === 'offer') {
+      // An offer arriving twice (a retry) must not restart the handshake.
+      if (pc.signalingState !== 'stable') return;
+      pc.setRemoteDescription(new RTCSessionDescription(d)).then(function () {
+        return pc.createAnswer();
+      }).then(function (a) {
+        return pc.setLocalDescription(a);
+      }).then(function () {
+        sig('answer', { type: pc.localDescription.type, sdp: pc.localDescription.sdp });
+      }).catch(function () { giveUpLink(); });
+      return;
+    }
+
+    if (msg.kind === 'answer') {
+      if (pc.signalingState !== 'have-local-offer') return;
+      pc.setRemoteDescription(new RTCSessionDescription(d)).catch(function () { giveUpLink(); });
+      return;
+    }
+
+    if (msg.kind === 'ice' && d) {
+      try { pc.addIceCandidate(new RTCIceCandidate(d)).catch(function () {}); } catch (e) { /* late */ }
+    }
+  }
+
+  /** The link is not coming up. Say nothing, drop it, and keep working. */
+  function giveUpLink() {
+    LINK.stop = true;
+    if (LINK.ch) { try { LINK.ch.close(); } catch (e) { /* already gone */ } }
+    LINK.ch = null;
+    if (LINK.pc) { try { LINK.pc.close(); } catch (e) { /* already gone */ } }
+    LINK.pc = null;
+    LINK.peer = '';
+    pump();
+  }
+
   /* -------------------------------------------------------------- screen -- */
 
   function show(which) {
@@ -453,6 +700,22 @@
     if (t < 0) t = 0;
     if (d > 0 && t > d) t = d;
 
+    /* Monotonic, so two presses in the same millisecond are still two
+     * different presses: the receiving side uses this number to recognise a
+     * packet it has already applied — once down the data channel and once
+     * through the server, since both are sent. */
+    var pt = Math.round(now() + (S.skew || 0));
+    if (pt <= (S.ptLast || 0)) pt = (S.ptLast || 0) + 1;
+    S.ptLast = pt;
+
+    /* THE SHORTCUT FIRST. A press down the open channel is there in the time
+     * the packets take between two phones; the POST below is the durable copy
+     * for a phone that joins later, and it is allowed to be slow. */
+    if (linkOpen()) {
+      try { LINK.ch.send(JSON.stringify({ t: t, p: video.paused ? 1 : 0, d: d, by: S.who, a: action, pt: pt })); }
+      catch (e) { /* the socket died mid-send: the POST below still carries it */ }
+    }
+
     apiJson('/api/state?code=' + S.code, {
       method: 'POST',
       body: {
@@ -465,7 +728,7 @@
          * server stores it as a hint; the receiving side adds
          * (server now - pt) to the position, which is how a resumed film
          * starts where the sender actually is rather than one up-leg behind. */
-        pt: Math.round(now() + (S.skew || 0))
+        pt: pt
       }
     }).then(function (res) {
       // Our own snapshot comes back through the stream too. Moving the cursor
@@ -484,6 +747,20 @@
    * @param {object} snap  {seq,t,p,d,at,by,a}
    */
   function apply(snap) {
+    /* THE SAME PRESS ARRIVES TWICE, on purpose: down the data channel (fast)
+     * and through the server (durable). Applying it twice would seek the film
+     * to the same place twice — a visible hiccup, and for a frame or two the
+     * picture would stutter. The press timestamp is unique and monotonic, so
+     * it is the identity of the press. */
+    if (snap.pt) {
+      /* Per SENDER, not globally: two phones press independently and their
+       * timestamps interleave. One shared high-water mark would throw away
+       * whichever phone pressed "earlier" after the other one moved it on. */
+      var who = snap.by || '';
+      if (snap.pt <= (S.lastPtBy[who] || 0)) return;
+      S.lastPtBy[who] = snap.pt;
+    }
+
     if (!S.ready) { S.pending = snap; return; }
 
     var explicit = snap.a === 'seek' || snap.a === 'hello';
@@ -559,6 +836,10 @@
    */
   function pump() {
     if (S.pumping || !S.code) return;
+    /* The channel is up: presses come down it in milliseconds and nothing
+     * needs to ask this host anything. One held request per phone per eight
+     * seconds, forever, is exactly the cost this removes. */
+    if (linkOpen()) return;
     S.pumping = true;
 
     var after = S.seq;
@@ -683,6 +964,7 @@
        * guest side moved one player and nobody else. */
       askWhere();
       pump();
+      startLink();
     }).catch(function (e) {
       S.uploading = false;
       $('pickHint').textContent = 'Copy stopped: ' + e.message;
@@ -842,6 +1124,7 @@
       $('roomBar').hidden = false;
       $('codeText').textContent = S.code;
       $('pickHint').textContent = 'Room ' + S.code + ' is open.';
+      startLink();                     // the guest may already be here
     }).catch(function (e) {
       fail('entryErr', 'The room service is not answering — it will retry on the next press.');
     });
@@ -857,6 +1140,7 @@
     S.host = false;
     saveSession();
     apiJson('/api/room?code=' + code + '&who=' + S.who).then(function (res) {
+      startLink();                     // the shortcut, before any of the film
       if (res.film && res.film.parts > 0) {
         S.film = res.film;
         show('wait');
@@ -906,7 +1190,9 @@
         hostPick: hostPick,
         create: createRoom,
         join: joinRoom,
-        video: video
+        video: video,
+        link: LINK,
+        linked: linkOpen
       };
     }
     var saved = S.code;
@@ -964,6 +1250,7 @@
           guestWatch();
           pump();
         }
+        startLink();                   // a reload keeps the room, and the link
       }).catch(function () {
         S.code = '';
         sessionStorage.clear();

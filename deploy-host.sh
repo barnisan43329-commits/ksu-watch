@@ -89,9 +89,13 @@ if [ "$WHAT" = "all" ] || [ "$WHAT" = "php" ]; then
   put "$HERE/php-backend/config.php"
   put "$HERE/php-backend/index.php"
   put "$HERE/php-backend/lib.php"
-  put "$HERE/php-backend/api/room.php"
-  put "$HERE/php-backend/api/film.php"
-  put "$HERE/php-backend/api/sync.php"
+  # Explicit remote paths. A bare basename puts these at the folder root,
+  # where nothing serves them — the deploy reports success, the API keeps
+  # answering from the old copy, and the change looks "not deployed".
+  put "$HERE/php-backend/api/room.php" api/room.php
+  put "$HERE/php-backend/api/film.php" api/film.php
+  put "$HERE/php-backend/api/sync.php" api/sync.php
+  put "$HERE/php-backend/api/sig.php" api/sig.php
   # data/ is created by the app and must survive a deploy: only its guard is sent.
   put "$HERE/php-backend/data/.htaccess" data/.htaccess
 fi

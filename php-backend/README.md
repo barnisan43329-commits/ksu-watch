@@ -66,6 +66,8 @@ Three things about the free tier matter here, and two of them shaped the code:
 | `GET` | `/api/part?code=&idx=` | the same bytes back |
 | `POST` | `/api/state?code=` | `{t,p,d,by,a,pt}` → `{snap}` |
 | `GET` | `/api/wait?code=&after=&ms=` | HOLD until `seq > after` |
+| `POST` | `/api/sig?code=&who=&to=` | `{kind,data}` — one WebRTC handshake message |
+| `GET` | `/api/sig?code=&who=` | collect mine, handed over once |
 
 `snap` is the whole shared state: `{seq, t (ms), p (0/1), d (ms), at (server
 ms), pt (server ms when the finger landed), by, a}`. The server assigns `seq` —
@@ -78,6 +80,12 @@ from the server's own clock. The receiving side adds `now - pt` to the position
 while playing, so a press that spent 400 ms on the wire (300 of them *before*
 the server wrote it down) lands where the sender actually is. Both numbers are
 in the server's units — no phone clock is ever compared with another phone's.
+
+`ids` in `/api/room` is the list of peer names, not just a count: the two phones
+have to name each other to open the data channel that carries presses. `/api/sig`
+is only a mailbox for the dozen SDP/ICE messages a handshake needs — once the
+channel is open, no press comes back here at all, and none of the held requests
+run. [Why it matters](../README.md#how-the-button-travels-and-why-it-is-instant).
 
 ## The page can live in this folder
 

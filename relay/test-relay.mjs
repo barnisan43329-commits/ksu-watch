@@ -159,5 +159,37 @@ ok(
   JSON.stringify(released.snap)
 );
 
+/* --- the shortcut: two phones introducing themselves ----------------------
+ *
+ * The button does not have to go through this host at all — a data channel
+ * between the two phones is ~2 ms where a round trip through the PHP is ~500.
+ * What the server still has to do is let them find each other, and that is
+ * /api/sig: a mailbox that hands each message over exactly once. */
+await call('/watch/api/room?code=' + code + '&who=alice');
+const both = JSON.parse(await (await call('/watch/api/room?code=' + code + '&who=bob')).text());
+ok('the room names both phones', Array.isArray(both.ids) && both.ids.indexOf('alice') !== -1 && both.ids.indexOf('bob') !== -1,
+  JSON.stringify(both.ids));
+
+const putSig = await call('/watch/api/sig?code=' + code + '&who=alice&to=bob', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ kind: 'offer', data: { type: 'offer', sdp: 'v=0 test' } }),
+});
+ok('a handshake message is accepted', putSig.status === 200);
+
+const box1 = JSON.parse(await (await call('/watch/api/sig?code=' + code + '&who=bob')).text());
+ok('and delivered to the addressee', box1.msgs.length === 1 && box1.msgs[0].from === 'alice' && box1.msgs[0].data.sdp === 'v=0 test',
+  JSON.stringify(box1.msgs).slice(0, 100));
+
+const box2 = JSON.parse(await (await call('/watch/api/sig?code=' + code + '&who=bob')).text());
+ok('and handed over exactly once', box2.msgs.length === 0, box2.msgs.length + ' left');
+
+const wrong = await call('/watch/api/sig?code=' + code + '&who=bob&to=alice', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ kind: 'nonsense', data: {} }),
+});
+ok('a message of an unknown kind is refused', wrong.status === 400, String(wrong.status));
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
