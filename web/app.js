@@ -618,12 +618,28 @@
 
     // No backend anywhere: ask for it here rather than letting every action
     // fail with a network error the person cannot act on.
+    if (API) {
+      // Say something useful when the server is configured but not answering.
+      // "Cannot reach the server" with the address it tried is a sentence the
+      // owner can act on; a dead Create button is not.
+      apiJson('/api/health', { timeout: 9000 }).catch(function (e) {
+        $('entryErr').hidden = false;
+        $('entryErr').textContent = 'The server at ' + API + ' is not answering (' +
+          (e && e.message ? e.message : e) + '). Correct the address below.';
+        $('srvBlock').hidden = false;
+        $('srvInput').value = API;
+      });
+    }
+
     if (!API) {
       $('srvBlock').hidden = false;
       $('createBtn').hidden = true;
       $('joinBtn').hidden = true;
       $('codeInput').hidden = true;
-      $('srvBtn').addEventListener('click', function () {
+    }
+
+    {
+      var save = function () {
         var v = String($('srvInput').value || '').trim().replace(/\/+$/, '');
         if (!/^https?:\/\/[^\s]+$/i.test(v)) {
           $('srvErr').hidden = false;
@@ -632,7 +648,9 @@
         }
         try { localStorage.setItem('ksu.api', v); } catch (e) { /* private mode */ }
         location.reload();
-      });
+      };
+
+      $('srvBtn').addEventListener('click', function() { save(); });
     }
 
     $('createBtn').addEventListener('click', createRoom);
