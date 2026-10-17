@@ -121,13 +121,18 @@ Two rules make the difference between "mirrored" and "twitching":
   backwards exactly; a press on the guest side moves the host too; nothing is
   published and no correction is applied during 1.5 s of plain playback (drift
   0.000 s).
+- **The mirror forwarding itself** — `https://barnisan43329-commits.github.io/ksu-watch/?r=NSTK96`
+  opened with no door left (the relay's daily allowance is spent) and landed on
+  `https://ksunimeet.gt.tc/watch/?r=NSTK96`, joined the room and sat in
+  "Waiting for the other person…". No message, no field, no press.
 - **The live page in a real browser** — a room created on the deployed page, a
   3 s film recorded and picked by hand, uploaded (8 MB piece path, preflight and
   POST both 200), pulled by a second client that opened the join link, and a
   press on the guest's side that moved the host to `2.1 s`. No console errors.
-- `android-app/KsuWatch.apk` — `versionCode 2 / 1.1`, signed with the project
-  key `35ece4…4efa`, `zipalign -c -p 4` passes, `assets/www/*` present with
-  forward-slash paths and carrying the relay address. Two defects found while
+- `android-app/KsuWatch.apk` — `versionCode 3 / 1.2`, signed with the project
+  key `35ece4…4efa`, `zipalign -c -p 4` passes, five `assets/www/*` entries with
+  forward-slash paths. It now opens `https://ksunimeet.gt.tc/watch/` and
+  falls back to the bundled copy when the main frame fails. Two defects found while
   checking it: the page was loaded from `file://`, where a WebView refuses
   every `fetch` — it is now served from an https origin of the app's own out of
   `assets/www` — and aapt2 on Windows had written asset names with backslashes,
