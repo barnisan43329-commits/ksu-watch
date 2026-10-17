@@ -12,6 +12,7 @@ import android.view.WindowManager;
 import android.webkit.MimeTypeMap;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -45,16 +46,23 @@ public class MainActivity extends Activity {
 
     private static final int PICK_FILE = 101;
 
-    /* The page is served to the WebView from an https address of our own,
-     * answered out of assets/www by shouldInterceptRequest — nothing is
-     * downloaded, so the interface still works with no signal.
+    /* WHERE THE APP OPENS, AND WHY IT IS THE HOST ITSELF.
      *
-     * WHY NOT file://. A page on file:// has an opaque origin, and a WebView
-     * with universal access off — the default, and the safe setting — refuses
-     * every fetch from it. Rooms, pieces and the sync all live behind fetch,
-     * so the app would open and then fail on the first button. An https origin
-     * makes those calls ordinary CORS against the backend instead. */
-    private static final String PAGE = "https://appassets.ksuwatch/www/index.html";
+     * The page and the API are served from one folder on the PHP host, so
+     * opening it there means every room call is same-origin: no CORS, no
+     * relay, no door, no third-party allowance, nothing to configure and
+     * nothing that can run out. The app carries no backend address of its own
+     * any more, because there is no longer anything to point at.
+     *
+     * WHY NOT file://, which is what this used to be. A page on file:// has an
+     * opaque origin and a WebView refuses every fetch from it — the app opened
+     * and failed on the first button. */
+    private static final String PAGE = "https://ksunimeet.gt.tc/watch/";
+
+    /* The copy inside the APK is no longer the app; it is the page shown when
+     * there is no signal, served from an https origin of our own so its own
+     * retry logic still works instead of hitting an opaque-origin wall. */
+    private static final String OFFLINE = "https://appassets.ksuwatch/www/index.html";
     private static final String ASSETS_HOST = "appassets.ksuwatch";
 
     private WebView web;
@@ -109,6 +117,29 @@ public class MainActivity extends Activity {
     /** assets/www, handed to the WebView as if it were a website. */
     private class Assets extends WebViewClient {
 
+        /* No signal, or the host is down: show the bundled page instead of
+         * Android's grey "webpage not available". It is the same app, it says
+         * "not connected — retrying", and it recovers by itself.
+         *
+         * Only the MAIN frame is redirected. A failed asset, an ad blocker or
+         * a missing favicon must never replace the page somebody is watching. */
+        @Override
+        public void onReceivedError(WebView view, WebResourceRequest req,
+                                    WebResourceError err) {
+            if (req != null && req.isForMainFrame()) {
+                goOffline();
+            }
+        }
+
+        @SuppressWarnings("deprecation")
+        @Override
+        public void onReceivedError(WebView view, int code, String description,
+                                    String failingUrl) {
+            if (failingUrl != null && !failingUrl.startsWith(OFFLINE)) {
+                goOffline();
+            }
+        }
+
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
             Uri url = req.getUrl();
@@ -146,6 +177,18 @@ public class MainActivity extends Activity {
                         new ByteArrayInputStream(("missing asset: " + path).getBytes()));
             }
         }
+    }
+
+    /** Point the shell at the bundled page, once, and never in a loop. */
+    private void goOffline() {
+        if (web == null) {
+            return;
+        }
+        String now = web.getUrl();
+        if (now != null && now.startsWith(OFFLINE)) {
+            return;
+        }
+        web.loadUrl(OFFLINE);
     }
 
     /** Leaving the video, going back inside the page, then leaving the app. */

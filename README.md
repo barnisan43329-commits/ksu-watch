@@ -2,30 +2,36 @@
 
 | | |
 |---|---|
-| **the page (live)** | https://barnisan43329-commits.github.io/ksu-watch/ |
-| **the PHP (live)** | https://ksunimeet.gt.tc/watch/api/health |
-| **the door in front of it** | https://site-6d82979dc7d4471590b04884f411bb74.freebuff.page/watch/api/health |
-| **the APK** | https://github.com/barnisan43329-commits/ksu-watch/releases/tag/v1.1 |
+| **the app (live, the one to share)** | https://ksunimeet.gt.tc/watch/ |
+| **the mirror** | https://barnisan43329-commits.github.io/ksu-watch/ |
+| **the PHP** | https://ksunimeet.gt.tc/watch/api/health |
+| **the door** (only the mirror needs it) | https://site-6d82979dc7d4471590b04884f411bb74.freebuff.page/watch/api/health |
+| **the APK** | https://github.com/barnisan43329-commits/ksu-watch/releases/tag/v1.2 |
 | **the repository** | https://github.com/barnisan43329-commits/ksu-watch |
 
-The two backend addresses are the same PHP. The second one is a relay, and the
-page uses it — see [the relay](relay/README.md) for the reason, which is one
-sentence long: InfinityFree answers every request with a JavaScript challenge
-that carries no `Access-Control-Allow-Origin`, so a page on another origin is
-refused before it can read the answer, and the host will not turn that off.
+**The first line is the app.** The page and the PHP are the same site there, so
+nothing sits in between: no CORS, no relay, no third-party request allowance.
+Open it, create a room, send the link. Two phones, either URL, works.
 
-If the page says *"the server at … is not answering"*, open the relay's
-`/api/health` yourself. It must answer
-`{"ok":true,"name":"ksu-watch",…,"writable":true}`.
+The mirror on GitHub Pages is the same five files. It is on another origin, so
+it needs a door; when its doors are out of allowance it forwards itself to the
+first line, room code included, and says nothing about servers. See
+[the relay](relay/README.md) for why a door is needed at all — one sentence:
+InfinityFree answers every request with a JavaScript challenge that carries no
+`Access-Control-Allow-Origin`, and will not turn that off.
+
+**There is no server field anywhere, and nothing to configure.** The page finds
+its own backend and hops to the next one when one stops answering.
 
 Two people, one film, and the buttons in the middle. No chat, no calls, no
 accounts, no server-side media.
 
 ```
 CURRENT/
-  web/            the page — GitHub Pages            (3 files + config.js)
-  relay/          the door — solves the host's challenge, adds CORS
-  php-backend/    the API — any PHP host             (InfinityFree and friends)
+  web/            the page — 4 files + 2 configs (mirror and same-origin)
+  php-backend/    the API — any PHP host, and where the page can live too
+  relay/          the door the mirror needs: challenge solved, CORS added
+  deploy-host.sh  one command: API + page to the host, verified byte for byte
   android-app/    the same page in a WebView, as APK
   .github/        Pages deployment
 ```
@@ -48,18 +54,17 @@ correction at all.
 
 ## Start
 
-1. **Backend** — upload `php-backend/` to a PHP host, make `data/` writable,
-   check `/api/health`. Details: [php-backend/README.md](php-backend/README.md).
-2. **Page** — put that address into [`web/config.js`](web/config.js), push, and
-   let the workflow publish `web/` to GitHub Pages.
-   Details: [web/README.md](web/README.md).
-3. **Relay** — `relay/` is already deployed; its address is what
-   `web/config.js` points at. Replacing it is one file and one command:
-   [relay/README.md](relay/README.md).
+1. **Both at once** — `./deploy-host.sh`. It uploads the API *and* the page to
+   the same folder on the host, so `/watch/` is the app and `/watch/api/*` is
+   its own API. Nothing to type afterwards.
+2. **The mirror** — push; the workflow publishes `web/` to GitHub Pages. Its
+   [`config.js`](web/config.js) lists the doors and the fallback, and needs no
+   editing to keep working.
+3. **Relay** — only the mirror uses it; it is already deployed and replacing it
+   is one file and one command: [relay/README.md](relay/README.md).
 4. **APK** — `bash android-app/build.sh` → `android-app/KsuWatch.apk`.
-   The page is bundled inside, so the app opens with no signal at all. If
-   `config.js` was left empty it asks for the server address once on the first
-   screen and keeps it on the phone — so the same APK works against any host.
+   The app opens the same page from the host, so it needs no door either, and
+   falls back to the bundled copy if there is no signal.
 
 ## Using it
 
@@ -100,13 +105,18 @@ Two rules make the difference between "mirrored" and "twitching":
 
 ## What was verified here
 
+- **The same-origin deployment in a real browser** — `https://ksunimeet.gt.tc/watch/`
+  loads with no server field, creates a room (`NSTK96`), and the pick screen
+  appears with no console error. That path has no relay in it at all.
 - `php-backend/tools/test-api.py` — **20 / 20** against a local PHP.
   `relay/test-relay.mjs` re-runs the same ground against the **live** host —
   **13 / 13**: AES checked block for block against Node's `crypto` (200 random
   cases), CORS and preflight, a room, two 128 KB pieces up and back down
   byte-identical, a Cyrillic film name, a press released through a held request.
-- `web/tools/test-mirror.mjs` — **18 / 18**, run against the **deployed relay**:
-  the real `app.js` twice, one "phone" each. Pause mirrors to `120.000` on both
+- `web/tools/test-mirror.mjs` — **23 / 23**, run against the **live PHP** (through
+  `relay/local-door.mjs`, which runs the real relay in-process so the tests spend
+  none of the deployed door's allowance): the real `app.js` twice, one "phone"
+  each. Pause mirrors to `120.000` on both
   sides; play after pause continues at `120.250` (never 0); a drag mirrors
   backwards exactly; a press on the guest side moves the host too; nothing is
   published and no correction is applied during 1.5 s of plain playback (drift
@@ -132,6 +142,10 @@ Two rules make the difference between "mirrored" and "twitching":
 - **Films larger than RAM.** The guest glues the pieces into one blob. That is
   fine for ordinary films and is the reason there is no seek-on-download
   streaming; a 4 GB file on a 3 GB phone will not work.
+- **The mirror while the door's allowance is out.** Freebuff Sites allows 10,000
+  requests a day per account and the door shares that; it was spent on testing
+  during this work, so the mirror forwards itself to the host until 00:00 UTC.
+  The host deployment is not affected at all.
 - **Long sessions on the free host.** The press → other-phone path measures
   ~280 ms through the relay, with occasional multi-second stalls when
   InfinityFree's shared PHP is busy. Nothing is lost (the snapshot carries a

@@ -5,6 +5,11 @@
 # own .htaccess, because a host that ignores one of them usually still honours
 # the other.
 
+# The page and the API share this folder, so the folder itself must open the
+# page and not the router. The router is still index.php for every path under
+# /api — this only decides what a bare directory request gets.
+DirectoryIndex index.html index.php
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteCond %{REQUEST_URI} ^/data/ [NC]

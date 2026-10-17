@@ -6,7 +6,7 @@ host — including the free ones that give you one MySQL database you would
 rather not spend on two people watching a film.
 
 ```
-index.php        router + CORS
+index.php        router + CORS, and the page itself when it is installed here
 lib.php          rooms, atomic JSON, snapshot sequencing, sweep
 config.php       chunk size, wait cap, room lifetime    ← the only knobs
 api/room.php     create / read a room
@@ -64,17 +64,32 @@ Three things about the free tier matter here, and two of them shaped the code:
 | `POST` | `/api/film?code=` | `{name,size,parts,type,chunk}` |
 | `POST` | `/api/part?code=&idx=` | one piece, raw body |
 | `GET` | `/api/part?code=&idx=` | the same bytes back |
-| `POST` | `/api/state?code=` | `{t,p,d,by,a}` → `{snap}` |
+| `POST` | `/api/state?code=` | `{t,p,d,by,a,pt}` → `{snap}` |
 | `GET` | `/api/wait?code=&after=&ms=` | HOLD until `seq > after` |
 
 `snap` is the whole shared state: `{seq, t (ms), p (0/1), d (ms), at (server
-ms), by, a}`. The server assigns `seq` — never a phone — so "apply this once"
-holds even when two presses arrive out of order.
+ms), pt (server ms when the finger landed), by, a}`. The server assigns `seq` —
+never a phone — so "apply this once" holds even when two presses arrive out of
+order.
 
-`at` is the server's millisecond when the snapshot was stored. The receiving
-side adds `now - at` to the position while playing, so a packet that spent
-80 ms in flight lands where the sender actually is. Phone clocks never enter
-the calculation.
+`at` is when the request reached the server; `pt` is when the finger landed,
+as stated by the phone that pressed and refused if it is more than a minute
+from the server's own clock. The receiving side adds `now - pt` to the position
+while playing, so a press that spent 400 ms on the wire (300 of them *before*
+the server wrote it down) lands where the sender actually is. Both numbers are
+in the server's units — no phone clock is ever compared with another phone's.
+
+## The page can live in this folder
+
+Put the frontend's five files next to `index.php` and the bare directory serves
+the page while `/api/*` serves the API. Same origin, no CORS, no relay, no
+third-party allowance — the deployment with nothing in between. The router
+detects the folder it was installed into from `SCRIPT_NAME`, so the same files
+work at the domain root and at `/watch/`.
+
+`../deploy-host.sh` does exactly that, and verifies every file by md5 after the
+upload because this host has been seen to accept an upload and keep serving the
+previous file.
 
 ## Test
 

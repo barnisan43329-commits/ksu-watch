@@ -184,10 +184,18 @@ function ksu_write_json(string $file, array $data): bool
  * `seq` exists for one reason: so a long-poll knows whether the value it is
  * about to return is newer than the one the phone already has.
  *
- * `at` is the SERVER millisecond at which the value was stored. The receiving
- * side adds (now - at) to the film position when playing, so a packet that
- * spent 80 ms in flight lands where the sender actually is now, not where he
- * was when he pressed. Two phone clocks never enter the calculation.
+ * `at` is the SERVER millisecond at which the value was stored. `pt` is the
+ * server millisecond at which the finger landed, as stated by the phone that
+ * pressed (0 when the phone could not say). The receiving side adds (now - pt)
+ * to the film position when playing, so a packet that spent 300 ms in flight
+ * lands where the sender actually is now, not where he was when he pressed and
+ * not where the server wrote it down a leg later.
+ *
+ * Both numbers are in the SERVER's units, which is the whole point: no phone
+ * clock is ever compared with another phone's clock. A phone turns its own
+ * timestamp into server units with the offset it measures on the same link
+ * (see local-door-wise `skew` in web/app.js), and the server refuses a `pt`
+ * that is not plausibly close to its own now.
  */
 function ksu_snap_path(string $code): string
 {
@@ -198,9 +206,9 @@ function ksu_snap_read(string $code): array
 {
     $s = ksu_read_json(ksu_snap_path($code));
     if ($s === null) {
-        return ['seq' => 0, 't' => 0, 'p' => 1, 'd' => 0, 'at' => 0, 'by' => '', 'a' => ''];
+        return ['seq' => 0, 't' => 0, 'p' => 1, 'd' => 0, 'at' => 0, 'pt' => 0, 'by' => '', 'a' => ''];
     }
-    return $s + ['seq' => 0, 't' => 0, 'p' => 1, 'd' => 0, 'at' => 0, 'by' => '', 'a' => ''];
+    return $s + ['seq' => 0, 't' => 0, 'p' => 1, 'd' => 0, 'at' => 0, 'pt' => 0, 'by' => '', 'a' => ''];
 }
 
 /**
@@ -211,7 +219,7 @@ function ksu_snap_read(string $code): array
  * order over a bad link and the later number still wins, because the receiver
  * only accepts strictly increasing `seq`.
  */
-function ksu_snap_store(string $code, int $t, int $p, int $d, string $by, string $a): array
+function ksu_snap_store(string $code, int $t, int $p, int $d, string $by, string $a, int $pt = 0): array
 {
     $file = ksu_snap_path($code);
     $lock = @fopen(ksu_room_dir($code) . '/snap.lock', 'c');
@@ -225,6 +233,7 @@ function ksu_snap_store(string $code, int $t, int $p, int $d, string $by, string
         'p' => $p ? 1 : 0,
         'd' => max(0, $d),
         'at' => ksu_now_ms(),
+        'pt' => max(0, $pt),
         'by' => substr(preg_replace('/[^A-Za-z0-9_-]/', '', $by) ?? '', 0, 24),
         'a' => substr(preg_replace('/[^a-z]/', '', $a) ?? '', 0, 12),
     ];

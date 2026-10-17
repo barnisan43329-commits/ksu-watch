@@ -27,29 +27,192 @@
 
   var CFG = window.KSU_CONFIG || {};
 
-  /* ?api=http://host overrides config.js for one page load. It is how you
-   * point a phone at a different backend without editing and re-deploying a
-   * file, and how the two-tab test drives the real page. */
+  /* ?api=http://host overrides config.js for one page load. It is how the test
+   * harness drives the real page against a local backend, and how an operator
+   * points a copy at a new host without editing and redeploying a file. */
   var PARAM = new URLSearchParams(location.search);
 
-  /*
-   * Where the backend is, in order of authority:
+  /* ================================================================ doors ==
    *
-   *   1. ?api=…          — one page load, used by tests and by a phone that is
-   *                        being pointed at another server by hand;
-   *   2. config.js       — the deployed answer, and the right one for the web;
-   *   3. this phone      — asked once on the entry screen and remembered. This
-   *                        is what makes the APK usable: a film app cannot
-   *                        ship with somebody else's server address baked in,
-   *                        and it cannot be rebuilt for every host either.
+   * WHERE THE ROOM SERVICE IS, AND WHY NOTHING HERE IS EVER ASKED OF A PERSON.
+   *
+   * There is no server field on this page and there is not going to be one. A
+   * person watching a film is not an administrator: "the address is not
+   * answering" is not a sentence they can act on, and a text box in front of
+   * Create a room is a bug wearing a settings screen.
+   *
+   * So the page carries an ordered list of DOORS to the same backend, probes
+   * them itself, keeps the fastest that answers, and hops to another the
+   * moment one stops answering. A door is a base URL. '' means "this very
+   * origin" — the deployment where the page is served by the PHP host itself,
+   * which needs no door at all because there is nothing in between.
+   *
+   * The order of authority:
+   *
+   *   1. ?api=…        — comma separated, one page load; tests and operators;
+   *   2. KSU_CONFIG.doors — the deployed list, fastest one wins the probe;
+   *   3. the last door that answered on this phone (remembered, not asked);
+   *   4. ''            — same origin, always last, always the safest.
    */
-  function resolveApi() {
-    var fromStore = '';
-    try { fromStore = localStorage.getItem('ksu.api') || ''; } catch (e) { /* private mode */ }
-    return String(PARAM.get('api') || CFG.backend || fromStore || '').replace(/\/+$/, '');
+
+  function makeDoors() {
+    var out = [];
+
+    function add(value) {
+      String(value === undefined || value === null ? '' : value).split(',').forEach(function (one) {
+        var v = String(one).trim().replace(/\/+$/, '');
+        if (v === '.' || v === '/') v = '';
+        // A bare word is a typo, not a door. Only a real base URL, or ''.
+        if (v && !/^https?:\/\/[^\s]/i.test(v)) return;
+        if (out.indexOf(v) === -1) out.push(v);
+      });
+    }
+
+    String(PARAM.get('api') || '').split(',').forEach(add);
+    (CFG.doors || []).forEach(add);
+    add(CFG.backend);
+
+    var last = '';
+    try { last = localStorage.getItem('ksu.door') || ''; } catch (e) { /* private mode */ }
+    last = String(last).replace(/\/+$/, '');
+    if (last && out.indexOf(last) > 0) {
+      out.splice(out.indexOf(last), 1);
+      out.unshift(last);
+    }
+
+    if (out.indexOf('') === -1) out.push('');
+    return out;
   }
 
-  var API = resolveApi();
+  var DOORS = makeDoors();
+  var API = DOORS[0];
+
+  /* Door -> the instant it may be tried again. A door that answered 429 with
+   * `Retry-After` is left alone for that long; a dead one for a minute. This
+   * is not a punishment, it is the only thing that stops a busy host from
+   * being hammered by a page that is already waiting. */
+  var DOWN = {};
+  var picking = null;
+
+  function isDown(base) {
+    return DOWN[base] > now();
+  }
+
+  function coolFor(err) {
+    var secs = 60;
+    if (err && err.retryAfter > 0) secs = err.retryAfter;
+    if (err && err.status === 429) secs = Math.max(secs, 120);
+    return Math.min(secs, 900) * 1000;
+  }
+
+  /**
+   * The URL for a call through a door.
+   *
+   * A door may be a whole base URL, or `''` for "this very origin". The empty
+   * one must resolve against the DIRECTORY THIS PAGE WAS SERVED FROM, not
+   * against the domain root: the same files can live at /watch/ and the API
+   * path is always /api/…, so a root-relative call would ask the domain for
+   * something that is not there. `./api/…` follows the document, wherever it
+   * is installed.
+   */
+  function urlFor(base, path) {
+    return base ? base + path : '.' + path;
+  }
+
+  /** One question to one door: are you the room service, and how fast are you? */
+  function probe(base) {
+    var t0 = now();
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 8000);
+    /* A probe always ends as a value, never as a throw. `base` may be '' — a
+     * relative fetch — and a runtime that refuses to resolve it throws
+     * SYNCHRONOUSLY, before any promise exists to catch it. One door doing
+     * that used to blow up the whole probe round and make every other door
+     * look dead. */
+    return Promise.resolve().then(function () {
+      return fetch(urlFor(base, '/api/health'), {
+        cache: 'no-store',
+        signal: ctl ? ctl.signal : undefined
+      });
+    }).then(function (r) {
+      clearTimeout(timer);
+      if (!r.ok) {
+        var e = new Error('http ' + r.status);
+        e.status = r.status;
+        var ra = Number(r.headers && r.headers.get && r.headers.get('Retry-After'));
+        if (ra > 0) e.retryAfter = ra;
+        throw e;
+      }
+      return r.json();
+    }).then(function (h) {
+      if (!h || h.ok !== true || h.name !== 'ksu-watch') throw new Error('not a room service');
+      return { base: base, rtt: now() - t0 };
+    }).catch(function (e) {
+      clearTimeout(timer);
+      return { base: base, err: e };
+    });
+  }
+
+  /**
+   * Find a door. In parallel, fastest first, and never more than one round of
+   * probing at a time however many presses are queued behind it.
+   */
+  function pickDoor(retry) {
+    var t = now();
+    var order = DOORS.filter(function (d) { return !isDown(d); });
+    if (!order.length) {
+      // Every door is cooling down. That is a reason to try them all once
+      // more, not a reason to strand the page: the cooldown protects a busy
+      // host from a page that is already waiting, it does not outrank it.
+      if (retry) return Promise.reject(new Error('no door answered'));
+      DOWN = {};
+      order = DOORS.slice();
+    }
+
+    return Promise.all(order.map(probe)).then(function (results) {
+      var good = results.filter(function (r) { return !r.err; })
+        .sort(function (a, b) { return a.rtt - b.rtt; });
+
+      results.forEach(function (r) {
+        if (r.err) DOWN[r.base] = now() + coolFor(r.err);
+        else delete DOWN[r.base];
+      });
+
+      if (!good.length) {
+        if (retry) throw new Error('no door answered');
+        return pickDoor(true);
+      }
+
+      API = good[0].base;
+      try { localStorage.setItem('ksu.door', API); } catch (e) { /* private mode */ }
+      $('foot').textContent = '';
+      return API;
+    });
+  }
+
+  /** The door to use right now, choosing one if the current one is out. */
+  function ensureDoor() {
+    if (!isDown(API)) return Promise.resolve(API);
+    if (!picking) {
+      picking = pickDoor(false).then(function (base) { picking = null; return base; },
+        function (e) { picking = null; throw e; });
+    }
+    return picking;
+  }
+
+  /** A door dying is not the app dying: say so, quietly, and hop. */
+  function doorDown(base, err) {
+    DOWN[base] = now() + coolFor(err);
+    if (base === API) $('foot').textContent = 'reconnecting…';
+  }
+
+  function isDoorError(e) {
+    if (!e) return false;
+    // No status at all means the fetch never completed: DNS, TLS, offline, or
+    // a relay that answered with a body that was not an answer.
+    if (e.status === undefined || e.status === 0) return true;
+    return e.status === 429 || e.status >= 500;
+  }
 
   /* How close the two players have to be before a command stops bothering to
    * seek. 20 ms is under one frame at 25 fps: seeking for less moves the
@@ -84,6 +247,10 @@
     pumping: false,
     canWait: true,
     fails: 0,
+    doorFails: 0,
+    skew: 0,             // server clock minus this phone's clock, in ms
+    skewN: 0,            // how many clock samples have been taken
+    skewRtt: 0,          // round trip of the best of them, in ms
     uploading: false,
     downloading: false
   };
@@ -107,9 +274,9 @@
 
   /* ----------------------------------------------------------------- api -- */
 
-  function api(path, opt) {
+  function rawApi(base, path, opt) {
     opt = opt || {};
-    var url = API + path;
+    var url = urlFor(base, path);
     var init = { method: opt.method || 'GET', cache: 'no-store' };
     if (opt.body !== undefined) {
       // A Blob is bytes and goes up as bytes. Stringifying one sends the two
@@ -139,16 +306,65 @@
     return fetch(url, init);
   }
 
+  /**
+   * Every call the app makes goes through here.
+   *
+   * The point of the wrapper is one line: if the door in front of the backend
+   * stops answering — a quota, a redeploy, a host falling over — the call is
+   * repeated once through the next door that answers. The caller never learns
+   * that it happened, and neither does the person holding the phone.
+   *
+   * Only transport-level failures hop. A 404 means the room is gone and a 400
+   * means the request was wrong: another door would say the same thing.
+   */
+  function isDoorStatus(status) {
+    return status === 429 || status >= 500;
+  }
+
+  function api(path, opt) {
+    /* ONE retry, through one other door. Two would be a loop in a storm, and
+     * if two doors in a row cannot answer, the third will not either. */
+    return attempt(0);
+
+    function attempt(n) {
+      return ensureDoor().then(function (base) {
+        return rawApi(base, path, opt).then(function (r) {
+          /* A 429 is a RESPONSE, not a rejection. It used to travel straight
+           * back to the caller, which meant "allowance reached" reached the
+           * person as an error while every other door sat unused. A dead
+           * door is a dead door whether it hangs up or answers politely. */
+          if (r.ok || !isDoorStatus(r.status) || n > 0) return r;
+          var ra = Number(r.headers && r.headers.get && r.headers.get('Retry-After'));
+          doorDown(base, { status: r.status, retryAfter: ra > 0 ? ra : 0 });
+          return attempt(n + 1);
+        }, function (e) {
+          if (!isDoorError(e) || n > 0) throw e;
+          doorDown(base, e);
+          return attempt(n + 1);
+        });
+      });
+    }
+  }
+
   function apiJson(path, opt) {
+    var sentAt = now();
     return api(path, opt).then(function (r) {
       if (!r.ok) {
         return r.text().then(function (t) {
           var err = new Error('http ' + r.status + ' ' + t.slice(0, 80));
           err.status = r.status;
+          var ra = Number(r.headers && r.headers.get && r.headers.get('Retry-After'));
+          if (ra > 0) err.retryAfter = ra;
           throw err;
         });
       }
       return r.json();
+    }).then(function (res) {
+      var gotAt = now();
+      /* Only fast answers refine the clock. A held wait is answered when a
+       * press arrives, which says nothing about how long the wire took. */
+      if (gotAt - sentAt < 1500) takeSkew(res, sentAt, gotAt);
+      return res;
     });
   }
 
@@ -239,7 +455,18 @@
 
     apiJson('/api/state?code=' + S.code, {
       method: 'POST',
-      body: { t: t, p: video.paused ? 1 : 0, d: d, by: S.who, a: action }
+      body: {
+        t: t,
+        p: video.paused ? 1 : 0,
+        d: d,
+        by: S.who,
+        a: action,
+        /* the press moment in the SERVER's units (pt = pressed at). The
+         * server stores it as a hint; the receiving side adds
+         * (server now - pt) to the position, which is how a resumed film
+         * starts where the sender actually is rather than one up-leg behind. */
+        pt: Math.round(now() + (S.skew || 0))
+      }
     }).then(function (res) {
       // Our own snapshot comes back through the stream too. Moving the cursor
       // past it is what stops us from applying our own press to ourselves.
@@ -260,7 +487,23 @@
     if (!S.ready) { S.pending = snap; return; }
 
     var explicit = snap.a === 'seek' || snap.a === 'hello';
-    var age = Math.max(0, Math.min(5, (now() - snap.at) / 1000));
+    /* HOW LONG AGO THE FINGER LANDED.
+     *
+     * Both timestamps in the snapshot are in the SERVER's units: `pt` (where
+     * the finger was, stated by the phone that pressed) and `at` (where the
+     * server wrote it down a leg later). Comparing either with this phone's
+     * own clock would mix two clocks and produce a number with no meaning —
+     * a server a second ahead made every packet look "not yet sent", the
+     * travel time collapsed to zero, and a resumed film started a leg behind.
+     *
+     * S.skew is this phone's offset from the server, measured on the fastest
+     * exchange it has had. Adding it turns the local clock into server units,
+     * so the subtraction means what it says. */
+    /* The press moment, not the store moment: `pt` is where the finger was in
+     * server time, `at` the fallback for a phone that could not say (or an
+     * older backend that does not store it). */
+    var pressedAt = (snap.pt && snap.pt > 0) ? snap.pt : snap.at;
+    var age = Math.max(0, Math.min(5, (now() + (S.skew || 0) - pressedAt) / 1000));
 
     // While the film runs, the sender has moved on since the packet left:
     // add the time it spent travelling. While paused, time is not passing and
@@ -269,6 +512,11 @@
     var d = isFinite(video.duration) ? video.duration : 0;
     if (d > 0) target = Math.min(target, d);
     if (target < 0) target = 0;
+
+    /* Kept for the console and for a test to read: the two numbers that
+     * decide whether a resumed film starts in the right place. */
+    S.age = Math.round(age * 1000);
+    S.target = Math.round(target * 1000);
 
     var delta = target - video.currentTime;
     var maySeek = Math.abs(delta) > EXACT_S && (explicit || delta > -BACK_MAX_S);
@@ -320,6 +568,7 @@
     apiJson(path, { timeout: ms + 6000 }).then(function (res) {
       S.pumping = false;
       S.fails = 0;
+      S.doorFails = 0;
       if (res && res.snap && res.snap.seq > after) {
         S.seq = res.snap.seq;
         if (res.snap.by !== S.who) apply(res.snap);
@@ -327,6 +576,19 @@
       pump();
     }).catch(function (err) {
       S.pumping = false;
+      /* A door that died is not a host that cannot hold. Counting it as one
+       * would drop the app into 300 ms polling right when the network is at
+       * its worst, and it would stay there. The door is swapped instead, and
+       * the hold is tried again through the next one. */
+      if (isDoorError(err)) {
+        doorDown(API, err);
+        /* Back off, but not for long and never to a stop. A door that died is
+         * usually a quota or a redeploy: it can come back on its own, and the
+         * film must be sitting there waiting when it does. */
+        S.doorFails = (S.doorFails || 0) + 1;
+        setTimeout(pump, Math.min(15000, 600 * Math.pow(2, Math.min(5, S.doorFails))));
+        return;
+      }
       S.fails = (S.fails || 0) + 1;
       // A host that does not know the endpoint (an old or foreign backend)
       // falls back to plain polling at once. A host that KILLS held requests —
@@ -337,6 +599,35 @@
       if (S.fails >= 3) S.canWait = false;
       setTimeout(pump, S.canWait ? 400 : POLL_MS);
     });
+  }
+
+  /**
+   * Learn the offset between the server's clock and this phone's.
+   *
+   * Transport delay is measured by comparing a packet's server timestamp with
+   * the server's idea of now, so the two have to be reconciled once per answer.
+   * Smoothed half-and-half: one slow answer should not jerk the players.
+   */
+  function takeSkew(res, sentAt, gotAt) {
+    if (!res || typeof res.now !== 'number' || !res.now) return;
+    /* The midpoint is what makes this an offset rather than a delay. The
+     * server's `now` is stamped when the answer is built, so it lands about
+     * half a round trip after we sent and half a round trip before we read:
+     * comparing it with the midpoint of our own two timestamps cancels the
+     * network out, and what is left is the difference between the clocks. */
+    var sample = res.now - Math.round((sentAt + gotAt) / 2);
+    var rtt = gotAt - sentAt;
+    if (Math.abs(sample) > 300000) return;             // a stale or wrong answer
+    /* KEEP THE BEST SAMPLE, NOT THE AVERAGE. The error in an offset measured
+     * this way is half the round trip, so the answer from the FASTEST exchange
+     * is the most accurate one — and a shared host answers in 300 ms one press
+     * and 3 s the next. Averaging those together would import the 3 s one's
+     * error into every position the other phone is given. */
+    if (!S.skewN || rtt < S.skewRtt) {
+      S.skew = sample;
+      S.skewRtt = rtt;
+    }
+    S.skewN = (S.skewN || 0) + 1;
   }
 
   /** The one question this app asks: "where is the film right now?" */
@@ -552,7 +843,7 @@
       $('codeText').textContent = S.code;
       $('pickHint').textContent = 'Room ' + S.code + ' is open.';
     }).catch(function (e) {
-      fail('entryErr', 'Cannot reach the server: ' + e.message);
+      fail('entryErr', 'The room service is not answering — it will retry on the next press.');
     });
   }
 
@@ -579,7 +870,7 @@
         S.code = '';
         fail('entryErr', 'No room with that code.');
       } else {
-        fail('entryErr', 'Cannot reach the server: ' + e.message);
+        fail('entryErr', 'The room service is not answering — it will retry on the next press.');
       }
     });
   }
@@ -620,44 +911,23 @@
     }
     var saved = S.code;
 
-    $('foot').textContent = API ? ('server: ' + API.replace(/^https?:\/\//, '')) : 'server: not set';
-
-    // No backend anywhere: ask for it here rather than letting every action
-    // fail with a network error the person cannot act on.
-    if (API) {
-      // Say something useful when the server is configured but not answering.
-      // "Cannot reach the server" with the address it tried is a sentence the
-      // owner can act on; a dead Create button is not.
-      apiJson('/api/health', { timeout: 9000 }).catch(function (e) {
-        $('entryErr').hidden = false;
-        $('entryErr').textContent = 'The server at ' + API + ' is not answering (' +
-          (e && e.message ? e.message : e) + '). Correct the address below.';
-        $('srvBlock').hidden = false;
-        $('srvInput').value = API;
-      });
-    }
-
-    if (!API) {
-      $('srvBlock').hidden = false;
-      $('createBtn').hidden = true;
-      $('joinBtn').hidden = true;
-      $('codeInput').hidden = true;
-    }
-
-    {
-      var save = function () {
-        var v = String($('srvInput').value || '').trim().replace(/\/+$/, '');
-        if (!/^https?:\/\/[^\s]+$/i.test(v)) {
-          $('srvErr').hidden = false;
-          $('srvErr').textContent = 'A full address, starting with http:// or https://';
-          return;
-        }
-        try { localStorage.setItem('ksu.api', v); } catch (e) { /* private mode */ }
-        location.reload();
-      };
-
-      $('srvBtn').addEventListener('click', function() { save(); });
-    }
+    /* NOBODY IS ASKED WHERE THE BACKEND IS. The doors are probed here, once,
+     * in parallel; the fastest that answers is the one this session uses and
+     * the one remembered for next time. While that is happening the page says
+     * so in the footer and the buttons still work — they wait for a door
+     * rather than failing in front of somebody. */
+    $('foot').textContent = 'connecting…';
+    pickDoor(false).then(function () {
+      $('foot').textContent = '';
+      $('entryErr').hidden = true;
+    }).catch(function () {
+      /* Not one door answered. This is the hosting being down or a quota
+       * being gone — neither of which a person can fix by typing an address,
+       * and both of which clear up on their own. So the page says it is
+       * trying, and keeps trying, and lights up by itself when a door is
+       * back. Nothing is disabled: a press waits for a door. */
+      offline();
+    });
 
     $('createBtn').addEventListener('click', createRoom);
     $('joinBtn').addEventListener('click', function () {
@@ -703,6 +973,51 @@
     }
 
     show('entry');
+  }
+
+  /**
+   * No door is answering. Say it once, keep retrying, recover on its own.
+   *
+   * A retry loop here is not a poll of the room — nothing about the film
+   * depends on it — it is the page looking up every few seconds to see whether
+   * the hosting is back. When it is, `API` is set and the footer clears
+   * without a reload and without a word from the person. */
+  function offline() {
+    /* A LAST DOOR THAT IS NOT A DOOR.
+     *
+     * This page can be opened from two places: the host that runs the API
+     * itself (where nothing can fail this way) and a mirror on another origin
+     * that needs a door in between. When the mirror's doors are all out — a
+     * quota, a bad night at the door — the mirror has no business showing an
+     * error to somebody who just wants to watch a film. It forwards them, once,
+     * to the copy that is the same site as the API, room code included.
+     *
+     * Guarded three ways so it can never loop: only when a destination is
+     * configured, never when we are already there, and only once per tab. */
+    var fb = String(CFG.fallback || '');
+    if (fb && typeof location.replace === 'function' && location.href.indexOf(fb) !== 0) {
+      var forwarded = '0';
+      try { forwarded = sessionStorage.getItem('ksu.fwd') || '0'; } catch (e) { /* private mode */ }
+      if (forwarded !== '1') {
+        try { sessionStorage.setItem('ksu.fwd', '1'); } catch (e) { /* private mode */ }
+        var r = PARAM.get('r') || '';
+        location.replace(fb + (r ? '?r=' + encodeURIComponent(r) : ''));
+        return;
+      }
+    }
+
+    $('foot').textContent = 'not connected — retrying';
+    if ($('entryErr').hidden) {
+      $('entryErr').hidden = false;
+      $('entryErr').textContent = 'The room service is not answering. This page keeps trying by itself — nothing to set up.';
+    }
+    setTimeout(function () {
+      DOWN = {};
+      ensureDoor().then(function () {
+        $('foot').textContent = '';
+        $('entryErr').hidden = true;
+      }).catch(offline);
+    }, 8000);
   }
 
   function startGuest() {

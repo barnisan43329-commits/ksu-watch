@@ -14,25 +14,29 @@ tools/       tests (not used by the page)
 Deployed to GitHub Pages by `.github/workflows/pages.yml`, which publishes this
 folder as-is whenever `CURRENT/web/**` changes on `main`.
 
-## Before the first deploy
+## Two configurations, one page
 
-Edit `config.js`:
+| file | where it is used |
+|---|---|
+| `config.js` | the mirror on GitHub Pages: a list of `doors` and a `fallback` |
+| `config.host.js` | uploaded as `config.js` by `../deploy-host.sh`, for the copy served BY the PHP host: `doors: []` — this very origin |
 
-```js
-window.KSU_CONFIG = { backend: "https://your-relay/watch" };
-```
+**Nothing in either is asked of a person.** There is no server field on the page
+and no code path that reveals one.
 
-No trailing slash, no `/api` — the page adds that itself.
+A **door** is a base URL in front of the same PHP. The page probes every door in
+parallel at load, keeps the fastest that answers, remembers it for next time, and
+hops to another the moment one stops — a 429, a 5xx, a dead socket. A door that
+answers 429 goes to sleep for two minutes instead of being hammered on every
+press. `''` is a door too: it means *this very origin*, and it is always last.
 
-It points at the **relay**, not straight at the PHP: InfinityFree answers every
-request with a JavaScript anti-bot challenge that carries no CORS header, so a
-page on GitHub Pages is refused before it can read the answer. The relay solves
-that challenge server-side and forwards the call — the PHP still does all of
-the work. [Why, in full](../relay/README.md).
+The mirror needs a door because it is on another origin: InfinityFree wraps
+every response in a JavaScript challenge with no `Access-Control-Allow-Origin`,
+so the page is refused before it can read the answer. [Why, in full](../relay/README.md).
 
-If it is left empty, the page asks for the address once on the entry screen and
-keeps it on the phone. That is what the APK relies on: it is built from this
-same folder, and a film app cannot ship with somebody else's server baked in.
+The copy served by the host needs no door at all — the page and the API are the
+same site — and when every door of the mirror is out, the mirror forwards itself
+there, room code included (`fallback`), instead of showing an error.
 
 ## How it works, in one paragraph
 
@@ -64,7 +68,9 @@ Two "phones" in one Node process, running this very `app.js` against a real
 backend:
 
 ```bash
-node tools/test-mirror.mjs http://127.0.0.1:8098 http://127.0.0.1:8099
+# the real relay and the real PHP, in-process, no platform allowance spent:
+node ../relay/local-door.mjs 8096 8097 &
+node tools/test-mirror.mjs http://127.0.0.1:8096/watch http://127.0.0.1:8097/watch
 ```
 
 Two ports because PHP's built-in server is single-threaded on Windows: a phone

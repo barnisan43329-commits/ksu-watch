@@ -39,9 +39,44 @@ $path = (string) (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/'
 $path = '/' . trim($path, '/');
 $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
-// Behind a shared host the app may live in a subdirectory, so match on the tail.
+/* WHERE IS THE APP, WHEN IT IS NOT AT THE DOMAIN ROOT.
+ *
+ * A shared host usually gives you a subdirectory (/watch), and the same files
+ * have to work at /watch/api/health and at /api/health. SCRIPT_NAME says
+ * exactly where the router itself is, so the prefix can be taken off instead
+ * of guessed. Everything below then sees a path as if the app were at the
+ * root: '/' for the folder, '/api/health' for the probe. */
+$script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
+$base = rtrim(dirname($script), '/');
+if ($base === '.' || $base === '\\') {
+    $base = '';
+}
+if ($base !== '' && strpos($path, $base) === 0) {
+    $path = substr($path, strlen($base));
+    if ($path === '' || $path === false) {
+        $path = '/';
+    }
+}
+
+// Behind a proxy or a host that changes SCRIPT_NAME, match on the tail anyway.
 if (($pos = strpos($path, '/api/')) !== false) {
     $path = substr($path, (int) $pos);
+}
+$path = '/' . trim($path, '/');
+
+/* THE PAGE, FROM THE SAME FOLDER.
+ *
+ * When this folder also holds the frontend, the bare directory must open the
+ * page and not the router. DirectoryIndex would do it, except a shared host's
+ * account-wide .htaccess already lists index.php first and a per-directory
+ * DirectoryIndex is not guaranteed to win. So the router answers for the
+ * directory itself: same URL, same origin as the API, no redirect and nothing
+ * for a person to type. */
+if ($path === '/' && $method === 'GET' && is_file(__DIR__ . '/index.html')) {
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-cache');
+    readfile(__DIR__ . '/index.html');
+    exit;
 }
 
 switch ($path) {
@@ -95,6 +130,6 @@ function ksu_health(): void
         'maxChunk' => KSU_CHUNK,
         'waitMs' => KSU_WAIT_MS,
         'writable' => is_dir(KSU_DATA) && is_writable(KSU_DATA),
-        'version' => 1,
+        'version' => 2,
     ]);
 }

@@ -24,6 +24,7 @@
  */
 
 import fs from 'node:fs';
+import http from 'node:http';
 import vm from 'node:vm';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,10 +59,11 @@ async function until(fn, ms = 6000, label = 'condition') {
 
 /* -------------------------------------------------------------- a phone -- */
 
-function phone(label, api) {
+function phone(label, api, extraConfig) {
   const store = new Map();
   const events = {};
   const requests = [];
+  const replaced = [];
 
   const video = {
     _t: 0,
@@ -148,7 +150,9 @@ function phone(label, api) {
     location: {
       search: '?debug=1&api=' + encodeURIComponent(api),
       origin: 'http://test',
-      pathname: '/'
+      pathname: '/',
+      href: 'http://test/',
+      replace: (url) => replaced.push(url)
     },
     navigator: {},
     document: {
@@ -157,7 +161,7 @@ function phone(label, api) {
     }
   };
   sandbox.window = sandbox;
-  sandbox.window.KSU_CONFIG = { backend: api };
+  sandbox.window.KSU_CONFIG = Object.assign({ backend: api }, extraConfig || {});
 
   vm.createContext(sandbox);
   vm.runInContext(APP, sandbox, { filename: 'app.js' });
@@ -171,6 +175,7 @@ function phone(label, api) {
     hook,
     video,
     requests,
+    replaced,
     stop: () => clearInterval(ticker),
     text: (id) => el(id).textContent,
     el,
@@ -188,14 +193,69 @@ async function main() {
   console.log('host :', HOST_API);
   console.log('guest:', GUEST_API);
 
-  /* A page built without a backend address must ASK for one instead of
-   * failing every button with a network error. That is the path the APK takes
-   * when config.js is left empty, and it is worth a check of its own. */
-  const bare = phone('bare', '');
-  check('a page with no server asks for one', bare.el('srvBlock').hidden === false);
-  check('and hides the room actions until it has one',
-    bare.el('createBtn').hidden === true && bare.el('joinBtn').hidden === true);
+  /* --- nothing is ever asked of a person -------------------------------
+   *
+   * There is no server address field in the shipped page, and no code path
+   * that reveals one. This reads the real index.html rather than the running
+   * copy on purpose: the guarantee is about what is deployed. */
+  const HTML = fs.readFileSync(path.join(HERE, '..', 'index.html'), 'utf8');
+  check('the page has no server address field',
+    !/srvInput|srvBlock|srvBtn/.test(HTML) && !/Server address/i.test(HTML));
+
+  /* A door that is not there at all: connection refused. The page must say it
+   * is retrying and leave every button alone — a dead backend is the hosting's
+   * problem, not a form for the person to fill in. */
+  const bare = phone('bare', 'http://127.0.0.1:9');
+  await until(() => /retry/i.test(bare.text('foot')), 6000, 'the retrying line');
+  check('with no door at all the page says it is retrying',
+    /retry/i.test(bare.text('foot')), `foot: ${bare.text('foot')}`);
+  check('and asks for nothing: both room buttons stay usable',
+    bare.el('createBtn').hidden === false && bare.el('joinBtn').hidden === false);
   bare.stop();
+
+  /* A mirror with no reachable door and the same-origin copy configured as
+   * its destination: the page forwards itself there, room code included,
+   * instead of explaining a server problem to somebody holding a phone. */
+  const fwd = phone('fwd', 'http://127.0.0.1:9', { fallback: 'https://host.test/watch/' });
+  await until(() => fwd.replaced.length > 0, 6000, 'the forward');
+  check('a mirror with no door forwards to the same-origin copy',
+    fwd.replaced.length === 1 && fwd.replaced[0].indexOf('https://host.test/watch/') === 0,
+    fwd.replaced.join(' '));
+  await new Promise((r) => setTimeout(r, 600));
+  check('and forwards exactly once, not in a loop', fwd.replaced.length === 1,
+    `${fwd.replaced.length} forward(s)`);
+  fwd.stop();
+
+  /* --- a door that answers 429, and the hop past it ---------------------
+   *
+   * The exact shape of the failure that brought this up: the hosting says
+   * "allowance reached" and the page used to answer that by asking for a
+   * server address. Here a real HTTP server answers 429 with the same body
+   * and the same Retry-After, placed FIRST in the door list, and the page has
+   * to reach the live backend behind it without being told anything. */
+  const exhausted = http.createServer((req, res) => {
+    exhaustedHits.push(req.url);
+    res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': '60' });
+    res.end('This site has reached its hosting allowance. Please try again later.');
+  });
+  const exhaustedHits = [];
+  await new Promise((r) => exhausted.listen(0, '127.0.0.1', r));
+  const EXHAUSTED = 'http://127.0.0.1:' + exhausted.address().port;
+
+  const hopper = phone('hopper', EXHAUSTED + ',' + HOST_API);
+  hopper.hook.create();
+  await until(() => hopper.hook.state.code, 8000, 'a room through the second door');  check('a door answering 429 is dropped and the next one is used',
+    hopper.hook.state.code && exhaustedHits.length > 0,
+    `${exhaustedHits.length} requests to the exhausted door, room ${hopper.hook.state.code}`);
+  if (!hopper.hook.state.code) {
+    for (const r of hopper.requests) console.log('    hop ->', r.method, r.url);
+    console.log('    exhausted saw:', exhaustedHits.join(', '));
+  }
+  check('and the page never mentions it',
+    !/server|429|allowance/i.test(hopper.text('foot') + hopper.text('entryErr')),
+    `foot: "${hopper.text('foot')}" err: "${hopper.text('entryErr')}"`);
+  hopper.stop();
+  await new Promise((r) => exhausted.close(r));
 
   const host = phone('host', HOST_API);
   const guest = phone('guest', GUEST_API);
@@ -259,7 +319,9 @@ async function main() {
     `guest at ${guest.video.currentTime.toFixed(3)} s`);
   check('play mirrors: both are within a frame of each other',
     Math.abs(guest.video.currentTime - host.video.currentTime) < 0.5,
-    `host ${host.video.currentTime.toFixed(3)} · guest ${guest.video.currentTime.toFixed(3)}`);
+    `host ${host.video.currentTime.toFixed(3)} · guest ${guest.video.currentTime.toFixed(3)}` +
+    ` · age ${guest.hook.state.age} ms, target ${guest.hook.state.target} ms,` +
+    ` skew ${guest.hook.state.skew} ms over ${guest.hook.state.skewN} sample(s)`);
   check('the play press advanced the shared sequence',
     guest.hook.state.seq > seqBeforePlay, `seq ${seqBeforePlay} -> ${guest.hook.state.seq}`);
 

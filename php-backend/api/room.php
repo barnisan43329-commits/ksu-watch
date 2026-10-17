@@ -18,7 +18,7 @@ function ksu_room_create(): void
     ]);
     // An empty snapshot at seq 0: "paused at the start, nothing known yet".
     ksu_write_json(ksu_snap_path($code), [
-        'seq' => 0, 't' => 0, 'p' => 1, 'd' => 0, 'at' => ksu_now_ms(), 'by' => '', 'a' => '',
+        'seq' => 0, 't' => 0, 'p' => 1, 'd' => 0, 'at' => ksu_now_ms(), 'pt' => 0, 'by' => '', 'a' => '',
     ]);
     ksu_json(['code' => $code, 'now' => ksu_now_ms()]);
 }

@@ -26,6 +26,24 @@ function ksu_state_put(): void
     $by = (string) ($body['by'] ?? '');
     $a = (string) ($body['a'] ?? '');                  // play | pause | seek | hello
 
+    /* WHEN THE FINGER LANDED, IN SERVER TIME.
+     *
+     * `at` is when this request reached the server, which is AFTER the press
+     * crossed the link — so a receiver that adds (its now - at) to the
+     * position re-anchors at the server's store moment and starts the film one
+     * up-leg behind the sender. On a free host that up-leg is 300-600 ms and
+     * it is visible.
+     *
+     * The sending phone therefore states the press moment in the server's own
+     * units (`pt` = its clock plus the offset it measured against this very
+     * server). It is a hint, so it is never trusted blindly: a wild value —
+     * a phone with no samples yet, a clock that jumped — is dropped and the
+     * store time is used instead, which is the old, safe behaviour. */
+    $pt = (int) round((float) ($body['pt'] ?? 0));
+    if ($pt <= 0 || abs($pt - ksu_now_ms()) > 60000) {
+        $pt = 0;
+    }
+
     if ($t < 0) {
         $t = 0;
     }
@@ -33,7 +51,7 @@ function ksu_state_put(): void
         $t = $d;
     }
 
-    $snap = ksu_snap_store($code, $t, $p ? 1 : 0, $d, $by, $a);
+    $snap = ksu_snap_store($code, $t, $p ? 1 : 0, $d, $by, $a, $pt);
     ksu_json(['snap' => $snap, 'now' => ksu_now_ms()]);
 }
 

@@ -9,7 +9,7 @@
      GitHub Pages caches for several minutes and offers no way to set headers,
      so without this a fixed stylesheet or script keeps running from the cache
      long after the deploy that fixed it. -->
-<link rel="stylesheet" href="style.css?v=1.0.3">
+<link rel="stylesheet" href="style.css?v=1.1.2">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -31,21 +31,10 @@
       The film stays on each phone. Only the buttons travel.
     </p>
 
-    <!-- Shown once, and only when the page was built without a backend
-         address — which is the case inside the APK if config.js was left
-         empty. Kept on the entry screen because nothing works without it. -->
-    <div id="srvBlock" hidden>
-      <label class="field">
-        <span>Server address</span>
-        <input id="srvInput" type="url" inputmode="url" autocomplete="off"
-               spellcheck="false" placeholder="https://your-site.example">
-      </label>
-      <button class="big ghost" id="srvBtn" type="button">Save and continue</button>
-      <p class="hint">Asked once. It is stored on this phone and asked for again only if it is cleared.</p>
-      <p class="err" id="srvErr" hidden></p>
-      <div class="or"><span>then</span></div>
-    </div>
-
+    <!-- There is deliberately no server field here. The page finds its own
+         door to the backend (see "doors" in app.js) and hops to another when
+         one stops answering; nothing about that is a decision a person
+         watching a film should ever be shown. -->
     <button class="big" id="createBtn" type="button">Create a room</button>
 
     <div class="or"><span>or</span></div>
@@ -102,7 +91,7 @@
   <span id="foot"></span>
 </footer>
 
-<script src="config.js?v=1.0.3"></script>
-<script src="app.js?v=1.0.3"></script>
+<script src="config.js?v=1.1.2"></script>
+<script src="app.js?v=1.1.2"></script>
 </body>
 </html>
