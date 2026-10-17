@@ -9,12 +9,19 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.webkit.MimeTypeMap;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 
 /**
  * KsuNiMeet Watch — a window for the page in assets/www.
@@ -37,6 +44,18 @@ import android.widget.FrameLayout;
 public class MainActivity extends Activity {
 
     private static final int PICK_FILE = 101;
+
+    /* The page is served to the WebView from an https address of our own,
+     * answered out of assets/www by shouldInterceptRequest — nothing is
+     * downloaded, so the interface still works with no signal.
+     *
+     * WHY NOT file://. A page on file:// has an opaque origin, and a WebView
+     * with universal access off — the default, and the safe setting — refuses
+     * every fetch from it. Rooms, pieces and the sync all live behind fetch,
+     * so the app would open and then fail on the first button. An https origin
+     * makes those calls ordinary CORS against the backend instead. */
+    private static final String PAGE = "https://appassets.ksuwatch/www/index.html";
+    private static final String ASSETS_HOST = "appassets.ksuwatch";
 
     private WebView web;
     private FrameLayout root;
@@ -61,10 +80,9 @@ public class MainActivity extends Activity {
         WebSettings s = web.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
-        s.setAllowFileAccess(true);
-        // The page lives on file:// and talks to a backend over https/http, so
-        // its Origin is "null" and the API answers with Access-Control-Allow-
-        // Origin: *. Nothing here needs local file reads from JavaScript.
+        // Nothing in the page reads local files: the film comes from the
+        // picker as a content:// stream, the interface from the intercept.
+        s.setAllowFileAccess(false);
         s.setAllowFileAccessFromFileURLs(false);
         s.setAllowUniversalAccessFromFileURLs(false);
         s.setLoadWithOverviewMode(true);
@@ -73,7 +91,7 @@ public class MainActivity extends Activity {
         s.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
         web.setBackgroundColor(Color.parseColor("#0d1117"));
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new Assets());
         web.setWebChromeClient(new Chrome());
 
         root.addView(web, new FrameLayout.LayoutParams(
@@ -84,7 +102,49 @@ public class MainActivity extends Activity {
         if (state != null) {
             web.restoreState(state);
         } else {
-            web.loadUrl("file:///android_asset/www/index.html");
+            web.loadUrl(PAGE);
+        }
+    }
+
+    /** assets/www, handed to the WebView as if it were a website. */
+    private class Assets extends WebViewClient {
+
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+            Uri url = req.getUrl();
+            if (url == null || !ASSETS_HOST.equals(url.getHost())) {
+                return null;                 // the backend: let it go to the network
+            }
+            String path = url.getPath();
+            if (path == null) {
+                return null;
+            }
+            while (path.startsWith("/")) {
+                path = path.substring(1);
+            }
+            if (path.isEmpty()) {
+                path = "www/index.html";
+            }
+            if (path.contains("..")) {
+                return null;
+            }
+
+            String ext = MimeTypeMap.getFileExtensionFromUrl("/" + path);
+            String mime = ext == null ? null : MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+            if (mime == null) {
+                mime = "application/octet-stream";
+            }
+            // Text is text; a film piece is bytes and must not be re-encoded.
+            String charset = mime.startsWith("text/") || mime.endsWith("javascript") || mime.endsWith("json")
+                    ? "utf-8" : null;
+
+            try {
+                InputStream in = getAssets().open(path);
+                return new WebResourceResponse(mime, charset, in);
+            } catch (IOException e) {
+                return new WebResourceResponse("text/plain", "utf-8",
+                        new ByteArrayInputStream(("missing asset: " + path).getBytes()));
+            }
         }
     }
 

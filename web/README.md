@@ -19,10 +19,16 @@ folder as-is whenever `CURRENT/web/**` changes on `main`.
 Edit `config.js`:
 
 ```js
-window.KSU_CONFIG = { backend: "https://your-site.infinityfreeapp.com" };
+window.KSU_CONFIG = { backend: "https://your-relay/watch" };
 ```
 
 No trailing slash, no `/api` — the page adds that itself.
+
+It points at the **relay**, not straight at the PHP: InfinityFree answers every
+request with a JavaScript anti-bot challenge that carries no CORS header, so a
+page on GitHub Pages is refused before it can read the answer. The relay solves
+that challenge server-side and forwards the call — the PHP still does all of
+the work. [Why, in full](../relay/README.md).
 
 If it is left empty, the page asks for the address once on the entry screen and
 keeps it on the phone. That is what the APK relies on: it is built from this
@@ -35,8 +41,11 @@ so nothing waits for a network. In the background the file is cut into 8 MB
 pieces and POSTed to the backend. The guest downloads the same pieces, glues
 them back into one blob, and plays that. Between presses the two players are
 not connected at all: no polling for position, no playback-rate correction, no
-drift loop. A press publishes one snapshot (position in ms, playing or not,
-duration) and the other side applies it exactly once.
+drift loop. A press — on either side — publishes one snapshot (position in ms,
+playing or not, duration) and the other side applies it exactly once.
+
+Both sides sit in a held request (`/api/wait`), so a press reaches the other
+player in the same moment the server stores it: no timer, no polling interval.
 
 ## The two rules that keep it from twitching
 

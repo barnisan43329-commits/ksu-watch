@@ -105,17 +105,23 @@ Two rules make the difference between "mirrored" and "twitching":
   **13 / 13**: AES checked block for block against Node's `crypto` (200 random
   cases), CORS and preflight, a room, two 128 KB pieces up and back down
   byte-identical, a Cyrillic film name, a press released through a held request.
-- `web/tools/test-mirror.mjs` — **17 / 17**, run against the **deployed relay**:
+- `web/tools/test-mirror.mjs` — **18 / 18**, run against the **deployed relay**:
   the real `app.js` twice, one "phone" each. Pause mirrors to `120.000` on both
   sides; play after pause continues at `120.250` (never 0); a drag mirrors
-  backwards exactly; nothing is published and no correction is applied during
-  1.5 s of plain playback (drift 0.000 s).
-- **The live page in a real browser** — room created, the player stage hidden
-  behind the entry screen as it should be, the film uploaded and mirrored from a
-  second client, no console errors.
+  backwards exactly; a press on the guest side moves the host too; nothing is
+  published and no correction is applied during 1.5 s of plain playback (drift
+  0.000 s).
+- **The live page in a real browser** — a room created on the deployed page, a
+  3 s film recorded and picked by hand, uploaded (8 MB piece path, preflight and
+  POST both 200), pulled by a second client that opened the join link, and a
+  press on the guest's side that moved the host to `2.1 s`. No console errors.
 - `android-app/KsuWatch.apk` — `versionCode 2 / 1.1`, signed with the project
-  key `35ece4…4efa`, `zipalign -c -p 4` passes, `assets/www/*` present and
-  carrying the relay address.
+  key `35ece4…4efa`, `zipalign -c -p 4` passes, `assets/www/*` present with
+  forward-slash paths and carrying the relay address. Two defects found while
+  checking it: the page was loaded from `file://`, where a WebView refuses
+  every `fetch` — it is now served from an https origin of the app's own out of
+  `assets/www` — and aapt2 on Windows had written asset names with backslashes,
+  which a device cannot look up (`build.sh` step 4 fixes that).
 
 ## What was NOT verified here
 

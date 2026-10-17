@@ -55,7 +55,7 @@ mkdir -p "$TMP/classes" "$TMP/dex" "$TMP/gen" "$TMP/assets/www"
 # --- the page becomes assets ------------------------------------------------
 # Only what ships. tools/ holds the tests, and the sample film is a test
 # fixture: neither belongs inside the APK.
-echo "[1/7] staging the page into assets/www ..."
+echo "[1/8] staging the page into assets/www ..."
 for f in index.html style.css app.js config.js icon.svg; do
   if [ ! -f "$WEB/$f" ]; then
     echo "MISSING web/$f" >&2
@@ -65,34 +65,55 @@ for f in index.html style.css app.js config.js icon.svg; do
 done
 echo "      $(du -sk "$TMP/assets/www" | cut -f1) KB of page"
 
-echo "[2/7] aapt2 compile resources ..."
+echo "[2/8] aapt2 compile resources ..."
 "$BT/aapt2.exe" compile --dir "$SRC/res" -o "$TMP/res.zip"
 
-echo "[3/7] aapt2 link (manifest + assets) ..."
+echo "[3/8] aapt2 link (manifest + assets) ..."
 "$BT/aapt2.exe" link -o "$TMP/base.apk" -I "$AJ" \
   --manifest "$SRC/AndroidManifest.xml" "$TMP/res.zip" \
   -A "$TMP/assets" \
   --min-sdk-version 23 --target-sdk-version 33 \
   --java "$TMP/gen"
 
-echo "[4/7] javac ..."
+# --- asset paths -----------------------------------------------------------
+# aapt2 on Windows writes asset entry names with the name separator of the
+# build machine: "assets/www\\index.html". A device looks the entry up by
+# "www/index.html", so the page is not found and the app opens to a white
+# screen. Rewritten here, before zipalign, because this is the last moment the
+# archive can be taken apart without touching the signature.
+echo "[4/8] normalising asset paths ..."
+python - "$TMP/base.apk" "$TMP/clean.apk" <<'PY'
+import sys, zipfile
+src, dst = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(src) as zi, zipfile.ZipFile(dst, 'w') as zo:
+    for it in zi.infolist():
+        data = zi.read(it.filename)
+        name = it.orig_filename.replace('\\', '/')
+        out = zipfile.ZipInfo(name, it.date_time)
+        out.compress_type = it.compress_type      # resources.arsc must stay stored
+        out.external_attr = it.external_attr
+        zo.writestr(out, data)
+PY
+mv -f "$TMP/clean.apk" "$TMP/base.apk"
+
+echo "[5/8] javac ..."
 CP="$AJ:$TMP/gen"
 ( cd "$SRC/src" && javac --release 8 -Xlint:-options -nowarn \
     -classpath "$CP" -d "$TMP/classes" \
     com/ksunimeet/watch/*.java "$TMP"/gen/com/ksunimeet/watch/R.java )
 
-echo "[5/7] d8 -> classes.dex ..."
+echo "[6/8] d8 -> classes.dex ..."
 D8IN=()
 while IFS= read -r c; do D8IN+=("$c"); done < <(find "$TMP/classes" -name '*.class')
 java -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 --release --lib "$AJ" \
   --min-api 23 --output "$TMP/dex" "${D8IN[@]}"
 
-echo "[6/7] pack, align ..."
+echo "[7/8] pack, align ..."
 cp -f "$TMP/base.apk" "$TMP/app.apk"
 ( cd "$TMP/dex" && jar uf "$TMP/app.apk" classes*.dex )
 "$BT/zipalign.exe" -p -f 4 "$TMP/app.apk" "$TMP/aligned.apk"
 
-echo "[7/7] sign ..."
+echo "[8/8] sign ..."
 java -jar "$BT/lib/apksigner.jar" sign \
   --v1-signing-enabled true --v2-signing-enabled true \
   --ks "$SRC/ksunimeet.keystore" --ks-pass pass:ksunimeet2026 \
