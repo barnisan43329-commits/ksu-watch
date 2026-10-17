@@ -306,10 +306,28 @@ async function main() {
     Math.abs(guest.video.currentTime - 40) < 0.4,
     `guest at ${guest.video.currentTime.toFixed(3)} s`);
 
+  /* PRESS 5 — the OTHER direction. The room is shared both ways: the guest
+   * may press too. Until this was fixed the host published and never
+   * listened, so a press on the guest side moved one player and stopped
+   * there. The 1.5 s first is the guest's own apply window: a seek inside it
+   * belongs to the snapshot it just received, not to a finger. */
+  await until(() => Date.now() > (guest.hook.state.suppress || 0) + 150, 4000,
+    'the guest apply window to close');
+  guest.video.currentTime = 90.0;
+  await sleep(200);
+  guest.video.pause();
+  await until(() => Math.abs(host.video.currentTime - 90) < 0.4, 5000, 'host to follow the guest');
+  check('a press on the guest side moves the host too',
+    Math.abs(host.video.currentTime - 90) < 0.4,
+    `host at ${host.video.currentTime.toFixed(3)} s`);
+
   /* --- quiet network ------------------------------------------------------ */
   const guestWaits = guest.requests.filter((r) => r.url.includes('/api/wait')).length;
   const guestPosts = guest.requests.filter((r) => r.url.includes('/api/state')).length;
-  check('the guest publishes only on its own presses', guestPosts <= 1,
+  /* Two, not fifteen: the guest's own drag (a seek, and a pause if it was
+   * playing) and nothing else. Every press it APPLIED from the host must have
+   * stayed local — republishing those is what makes two phones ping-pong. */
+  check('the guest publishes only on its own presses', guestPosts <= 2,
     `${guestPosts} state posts from the guest`);
   check('the guest spends its life in held waits, not in polls', guestWaits >= 3,
     `${guestWaits} waits`);

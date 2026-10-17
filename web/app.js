@@ -386,6 +386,12 @@
       S.uploading = false;
       $('pickHint').textContent = 'Copied. The other person can now pull it.';
       status('film copied · ' + S.film.parts + ' pieces', 'live');
+      /* AND START LISTENING. The room is shared in both directions: the guest
+       * may press play, pause or drag just as the host does, and until this
+       * line existed the host published but never listened, so a press on the
+       * guest side moved one player and nobody else. */
+      askWhere();
+      pump();
     }).catch(function (e) {
       S.uploading = false;
       $('pickHint').textContent = 'Copy stopped: ' + e.message;
