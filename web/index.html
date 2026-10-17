@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0d1117">
 <title>Watch together</title>
-<link rel="stylesheet" href="style.css">
+<!-- ?v= is bumped with every release.
+     GitHub Pages caches for several minutes and offers no way to set headers,
+     so without this a fixed stylesheet or script keeps running from the cache
+     long after the deploy that fixed it. -->
+<link rel="stylesheet" href="style.css?v=1.0.1">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 </head>
 <body>
@@ -99,6 +103,6 @@
 </footer>
 
 <script src="config.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=1.0.1"></script>
 </body>
 </html>
