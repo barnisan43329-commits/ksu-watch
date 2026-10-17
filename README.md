@@ -3,13 +3,20 @@
 | | |
 |---|---|
 | **the page (live)** | https://barnisan43329-commits.github.io/ksu-watch/ |
-| **the backend (live)** | https://ksunimeet.great-site.net/watch/api/health |
-| **the APK** | https://github.com/barnisan43329-commits/ksu-watch/releases/tag/v1.0 |
+| **the PHP (live)** | https://ksunimeet.gt.tc/watch/api/health |
+| **the door in front of it** | https://site-6d82979dc7d4471590b04884f411bb74.freebuff.page/watch/api/health |
+| **the APK** | https://github.com/barnisan43329-commits/ksu-watch/releases/tag/v1.1 |
 | **the repository** | https://github.com/barnisan43329-commits/ksu-watch |
 
-If the page says *"the server at … is not answering"*, the backend is not up:
-open that address yourself. It must answer `{"ok":true,"name":"ksu-watch",…}`.
-Everything else on this page is already deployed and needs no rebuild.
+The two backend addresses are the same PHP. The second one is a relay, and the
+page uses it — see [the relay](relay/README.md) for the reason, which is one
+sentence long: InfinityFree answers every request with a JavaScript challenge
+that carries no `Access-Control-Allow-Origin`, so a page on another origin is
+refused before it can read the answer, and the host will not turn that off.
+
+If the page says *"the server at … is not answering"*, open the relay's
+`/api/health` yourself. It must answer
+`{"ok":true,"name":"ksu-watch",…,"writable":true}`.
 
 Two people, one film, and the buttons in the middle. No chat, no calls, no
 accounts, no server-side media.
@@ -17,6 +24,7 @@ accounts, no server-side media.
 ```
 CURRENT/
   web/            the page — GitHub Pages            (3 files + config.js)
+  relay/          the door — solves the host's challenge, adds CORS
   php-backend/    the API — any PHP host             (InfinityFree and friends)
   android-app/    the same page in a WebView, as APK
   .github/        Pages deployment
@@ -45,7 +53,10 @@ correction at all.
 2. **Page** — put that address into [`web/config.js`](web/config.js), push, and
    let the workflow publish `web/` to GitHub Pages.
    Details: [web/README.md](web/README.md).
-3. **APK** — `bash android-app/build.sh` → `android-app/KsuWatch.apk`.
+3. **Relay** — `relay/` is already deployed; its address is what
+   `web/config.js` points at. Replacing it is one file and one command:
+   [relay/README.md](relay/README.md).
+4. **APK** — `bash android-app/build.sh` → `android-app/KsuWatch.apk`.
    The page is bundled inside, so the app opens with no signal at all. If
    `config.js` was left empty it asks for the server address once on the first
    screen and keeps it on the phone — so the same APK works against any host.
@@ -89,25 +100,33 @@ Two rules make the difference between "mirrored" and "twitching":
 
 ## What was verified here
 
-- `php-backend/tools/test-api.py` — **20 / 20**: piece returns byte for byte
-  (sha256), Cyrillic film name survives exactly, milliseconds survive the
-  snapshot, `seq` only grows, held wait answers a press in **14–17 ms**, empty
-  wait returns on time.
-- `web/tools/test-mirror.mjs` — **15 / 15**: runs the real `app.js` twice against
-  a real backend, one "phone" each. Pause mirrors to `120.000` on both sides;
-  play after pause continues at `120.300` (never 0); two presses in a row behave
-  the same; a drag mirrors backwards exactly; nothing is published and no
-  correction is applied during 1.5 s of plain playback (drift 0.000 s).
-- `android-app/KsuWatch.apk` — `versionCode 1 / 1.0`, signed with the project
-  key `35ece4…4efa`, `zipalign -c -p 4` passes, `assets/www/*` present.
+- `php-backend/tools/test-api.py` — **20 / 20** against a local PHP.
+  `relay/test-relay.mjs` re-runs the same ground against the **live** host —
+  **13 / 13**: AES checked block for block against Node's `crypto` (200 random
+  cases), CORS and preflight, a room, two 128 KB pieces up and back down
+  byte-identical, a Cyrillic film name, a press released through a held request.
+- `web/tools/test-mirror.mjs` — **17 / 17**, run against the **deployed relay**:
+  the real `app.js` twice, one "phone" each. Pause mirrors to `120.000` on both
+  sides; play after pause continues at `120.250` (never 0); a drag mirrors
+  backwards exactly; nothing is published and no correction is applied during
+  1.5 s of plain playback (drift 0.000 s).
+- **The live page in a real browser** — room created, the player stage hidden
+  behind the entry screen as it should be, the film uploaded and mirrored from a
+  second client, no console errors.
+- `android-app/KsuWatch.apk` — `versionCode 2 / 1.1`, signed with the project
+  key `35ece4…4efa`, `zipalign -c -p 4` passes, `assets/www/*` present and
+  carrying the relay address.
 
 ## What was NOT verified here
 
-- **InfinityFree's browser check.** The free tier answers non-browser clients
-  with a JavaScript challenge. This app is a browser, so it should pass, but
-  there is no account on that host in this workspace and I did not test it.
 - **Two real phones.** No Android device here. The mirror is proven in Node
-  against the real page and the real API; the last step needs fingers.
+  against the real page and the live backend; the last step needs fingers.
+- **The APK on a device.** It compiles, signs and aligns here, and its assets
+  are checked, but nothing in this workspace can press its buttons.
 - **Films larger than RAM.** The guest glues the pieces into one blob. That is
   fine for ordinary films and is the reason there is no seek-on-download
   streaming; a 4 GB file on a 3 GB phone will not work.
+- **Long sessions on the free host.** The press → other-phone path measures
+  ~280 ms through the relay, with occasional multi-second stalls when
+  InfinityFree's shared PHP is busy. Nothing is lost (the snapshot carries a
+  sequence number), but a press can feel slow at those moments.
