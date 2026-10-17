@@ -1,5 +1,16 @@
 # KsuNiMeet Watch — watch together, nothing else
 
+| | |
+|---|---|
+| **the page (live)** | https://barnisan43329-commits.github.io/ksu-watch/ |
+| **the backend (live)** | https://ksunimeet.great-site.net/watch/api/health |
+| **the APK** | https://github.com/barnisan43329-commits/ksu-watch/releases/tag/v1.0 |
+| **the repository** | https://github.com/barnisan43329-commits/ksu-watch |
+
+If the page says *"the server at … is not answering"*, the backend is not up:
+open that address yourself. It must answer `{"ok":true,"name":"ksu-watch",…}`.
+Everything else on this page is already deployed and needs no rebuild.
+
 Two people, one film, and the buttons in the middle. No chat, no calls, no
 accounts, no server-side media.
 
