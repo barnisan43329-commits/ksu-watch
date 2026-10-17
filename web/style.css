@@ -18,6 +18,14 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* `hidden` must win.
+ *
+ * The browser's own rule for [hidden] is a UA style, and any author rule that
+ * sets `display` beats it — #stage and .tapstart both set display:flex, so
+ * without this line the player sits visibly behind the entry screen and the
+ * "Tap to start" overlay appears before there is anything to start. */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
